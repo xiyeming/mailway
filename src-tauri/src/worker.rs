@@ -28,6 +28,7 @@ use mailway_core::sync::{FolderSync, SyncEngine};
 use mailway_core::types::{Account, Folder, FolderKind, Protocol};
 
 use crate::secrets;
+use crate::tokens;
 
 /// 同步有变化时发给前端的事件名。
 pub const EVENT_SYNC_CHANGED: &str = "sync://changed";
@@ -101,7 +102,7 @@ fn run_pop3(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
     let mut backoff = BACKOFF_MIN;
 
     loop {
-        let password = match secrets::get(&store, &account) {
+        let password = match tokens::effective_secret(&store, &account) {
             Ok(Some(p)) => p,
             Ok(None) => {
                 tracing::debug!(account = %account.email, "还没授权码，后台同步待命");
@@ -148,7 +149,7 @@ fn run_imap(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
     loop {
         // ---- 授权码 ---------------------------------------------------
         // 没填就别连：每轮都问一次钥匙串，用户填好后最迟 WAIT_FOR_SECRET 就能用。
-        let password = match secrets::get(&store, &account) {
+        let password = match tokens::effective_secret(&store, &account) {
             Ok(Some(p)) => p,
             Ok(None) => {
                 tracing::debug!(account = %account.email, "还没授权码，后台同步待命");

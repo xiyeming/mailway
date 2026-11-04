@@ -14,6 +14,7 @@ mod commands;
 mod demo;
 mod google_oauth;
 mod secrets;
+mod tokens;
 mod worker;
 
 use std::sync::Arc;
@@ -117,6 +118,8 @@ fn main() {
             commands::core_ping,
             commands::list_accounts,
             commands::create_account,
+            commands::set_account_secret,
+            commands::open_external_url,
             commands::test_account_login,
             commands::list_folders,
             commands::create_folder,

@@ -352,13 +352,20 @@ function buildForm(onSaved) {
   }
 
   // ---- Google 登录（XOAUTH2）--------------------------------------------
-  // 应用内 webview 跳 Google 授权 → 换 token → 把 token 放进「授权码」框
-  // （就是它的凭据），并把登录方式切成 `xoauth2`。凭据写死在客户端内。
+  // 应用内 webview 跳 Google 授权 → 换 token → 把**令牌包**放进「授权码」框，
+  // 并把登录方式切成 `xoauth2`。凭据写死在客户端内。
+  //
+  // 令牌包 JSON 格式同后端 tokens::pack：access_token 一小时就过期，
+  // 没有 refresh_token 的话隔天就登不上了 —— 所以整包存（含 refresh/过期时刻）。
   async function googleLogin() {
     status.textContent = "正在打开 Google 授权…（应用内弹窗，授权完自动回来）";
     try {
       const token = await invoke("google_oauth_login");
-      password.value = token.access_token;
+      password.value = JSON.stringify({
+        access: token.access_token,
+        refresh: token.refresh_token || "",
+        exp: Math.floor(Date.now() / 1000) + (token.expires_in || 3600) - 120,
+      });
       authType = "xoauth2";
       status.textContent = "已用 Google 授权，凭据已就位（可直接「添加」）";
     } catch (err) {

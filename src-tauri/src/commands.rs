@@ -28,6 +28,7 @@ use mailway_core::types::{
 };
 
 use crate::secrets;
+use crate::tokens;
 
 pub struct AppState {
     /// `Arc` 是给后台同步线程用的：它要能独立于任何一次 IPC 调用访问数据库。
@@ -219,7 +220,7 @@ pub fn sync_account(state: State<'_, AppState>, account_id: i64) -> Result<SyncR
         .ok_or_else(|| not_found("这个账号"))?;
     // POP3 走自己的同步（UIDL 增量，没有文件夹/标志概念）
     if account.protocol == Protocol::Pop3 {
-        let password = secrets::get(&state.store, &account)
+        let password = tokens::effective_secret(&state.store, &account)
             .map_err(e)?
             .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
         let mut pop = mailway_core::pop3::Conn::for_account(&account, &password).map_err(e)?;
@@ -250,7 +251,7 @@ pub fn sync_folder(state: State<'_, AppState>, folder_id: i64) -> Result<FolderS
         .map_err(e)?
         .ok_or_else(|| not_found("这个账号"))?;
     if account.protocol == Protocol::Pop3 {
-        let password = secrets::get(&state.store, &account)
+        let password = tokens::effective_secret(&state.store, &account)
             .map_err(e)?
             .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
         let mut pop = mailway_core::pop3::Conn::for_account(&account, &password).map_err(e)?;
@@ -331,7 +332,7 @@ fn connect(state: &State<'_, AppState>, account_id: i64) -> Result<(Account, Con
         .get_account(account_id)
         .map_err(e)?
         .ok_or_else(|| not_found("这个账号"))?;
-    let password = secrets::get(&state.store, &account)
+    let password = tokens::effective_secret(&state.store, &account)
         .map_err(e)?
         .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
     let conn = Conn::for_account(&account, &password).map_err(e)?;
@@ -377,7 +378,7 @@ fn push_flags(
     if account.protocol == Protocol::Pop3 {
         return Ok(()); // POP3 没有服务器标志，已读/标星是纯本地概念
     }
-    let password = secrets::get(store, &account)?
+    let password = tokens::effective_secret(store, &account)?
         .ok_or_else(|| Error::Secret("没有授权码".into()))?;
 
     let mut conn = Conn::for_account(&account, &password)?;
@@ -820,7 +821,7 @@ fn push_seen(store: &Store, folder_id: i64, uids: &[u32]) -> CoreResult<()> {
     if account.protocol == Protocol::Pop3 {
         return Ok(()); // 同 push_flags：POP3 标志纯本地
     }
-    let password = secrets::get(store, &account)?
+    let password = tokens::effective_secret(store, &account)?
         .ok_or_else(|| Error::Secret("没有授权码".into()))?;
     let mut conn = Conn::for_account(&account, &password)?;
     let res = SyncEngine::new(store).push_seen(&mut conn, &folder, uids);
@@ -955,7 +956,7 @@ fn move_message_remote(store: &Store, from_id: i64, to_id: i64, uid: u32) -> Cor
     let account = store
         .get_account(from.account_id)?
         .ok_or_else(|| Error::Config("账号已不存在".into()))?;
-    let password = secrets::get(store, &account)?
+    let password = tokens::effective_secret(store, &account)?
         .ok_or_else(|| Error::Secret("没有授权码".into()))?;
     let mut conn = Conn::for_account(&account, &password)?;
     let engine = SyncEngine::new(store);
@@ -978,7 +979,7 @@ fn delete_message_remote(store: &Store, folder_id: i64, uid: u32) -> CoreResult<
     let account = store
         .get_account(folder.account_id)?
         .ok_or_else(|| Error::Config("账号已不存在".into()))?;
-    let password = secrets::get(store, &account)?
+    let password = tokens::effective_secret(store, &account)?
         .ok_or_else(|| Error::Secret("没有授权码".into()))?;
     let mut conn = Conn::for_account(&account, &password)?;
     let res = SyncEngine::new(store).delete_message(&mut conn, &folder, uid);
@@ -1257,6 +1258,62 @@ pub fn set_account_enabled(
     state.store.get_account(account_id).map_err(e)?.ok_or_else(|| not_found("这个账号"))
 }
 
+/// 在系统默认浏览器里打开链接（邮件正文里点 `<a>` 用）。
+///
+/// 正文是**不可信输入** —— scheme 白名单在这里再把一道（净化层已经拦过
+/// `javascript:`/`data:`，纵深防御）：只放行 http/https/mailto。
+#[tauri::command(rename_all = "snake_case")]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    if !allowed_external_scheme(&url) {
+        return Err("只在浏览器里打开 http/https 链接".to_string());
+    }
+    std::process::Command::new("xdg-open")
+        .arg(&url)
+        .spawn()
+        .map_err(|err| format!("打开浏览器失败：{err}"))?;
+    Ok(())
+}
+
+/// 外部打开只认这几个 scheme（防 `javascript:` / `data:` / `file:` 等）。
+fn allowed_external_scheme(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mailto:")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_scheme_whitelist() {
+        assert!(allowed_external_scheme("https://example.com/a"));
+        assert!(allowed_external_scheme("HTTP://example.com"));
+        assert!(allowed_external_scheme("mailto:a@b.com"));
+        assert!(!allowed_external_scheme("javascript:alert(1)"));
+        assert!(!allowed_external_scheme("data:text/html,<script>"));
+        assert!(!allowed_external_scheme("file:///etc/passwd"));
+        assert!(!allowed_external_scheme("vbscript:x"));
+    }
+}
+
+/// 换授权码 / 重新写入 OAuth 令牌包（「重新登录 Google」用）。
+/// 值只进钥匙串，库里只记位置（见 [`crate::secrets`]）。
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_account_secret(
+    state: State<'_, AppState>,
+    account_id: i64,
+    secret: String,
+) -> Result<(), String> {
+    let account = state
+        .store
+        .get_account(account_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这个账号"))?;
+    secrets::set(&state.store, &account, &secret).map_err(e)
+}
+
 // ================================================================= 账号录入
 
 /// 新建账号要填的东西。
@@ -1409,7 +1466,7 @@ pub fn send_message(state: State<'_, AppState>, draft: DraftInput) -> Result<Sen
         .get_account(draft.account_id)
         .map_err(e)?
         .ok_or_else(|| not_found("这个账号"))?;
-    let password = secrets::get(&state.store, &account)
+    let password = tokens::effective_secret(&state.store, &account)
         .map_err(e)?
         .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
 

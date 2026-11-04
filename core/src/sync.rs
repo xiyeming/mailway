@@ -207,12 +207,18 @@ impl<'s> SyncEngine<'s> {
     /// `\NoSelect` 的跳过 —— 那是层级容器，SELECT 会被服务器拒绝。
     /// 本地没有的文件夹先建出来，所以「服务器上新建了文件夹」会自动出现在侧栏。
     pub fn sync_account(&self, conn: &mut Conn, account_id: i64) -> Result<Vec<FolderSync>> {
-        let mut out = Vec::new();
+        // 第一趟：LIST 把文件夹行**全部建齐** —— 目录树立刻就是全的。
+        // Gmail 一个箱几千封，逐箱「建了就同步」会让剩下的目录迟到半小时。
+        let mut folders = Vec::new();
         for remote in conn.list_folders()? {
             if remote.noselect() {
                 continue;
             }
-            let folder = self.ensure_folder(account_id, &remote)?;
+            folders.push(self.ensure_folder(account_id, &remote)?);
+        }
+        // 第二趟：逐箱收信。
+        let mut out = Vec::new();
+        for folder in folders {
             out.push(self.sync_folder(conn, account_id, &folder)?);
         }
         Ok(out)
@@ -720,7 +726,7 @@ impl<'s> SyncEngine<'s> {
         let id = self.store.upsert_folder(&NewFolder {
             account_id,
             imap_name: &remote.imap_name,
-            display_name: &remote.display_name,
+            display_name: &pretty_folder_name(&remote.display_name),
             kind,
             parent_id: None,
             delimiter: remote.delimiter,
@@ -777,6 +783,29 @@ fn flag_delta(server: &Flags, local: &Flags) -> (Vec<&'static str>, Vec<&'static
 ///
 /// 代价是会误伤：一个叫 `Consent` 的文件夹会被认成「已发送」（contains
 /// `sent`）。可接受，错了只影响侧栏排序和默认文件夹，不影响数据。
+/// 显示名美化：Gmail 的 `[Gmail]/All Mail` 们翻成中文（对齐网易邮箱大师），
+/// 用户标签原样保留。163 等的中文名（utf7 解码后的 `已发送`）不受影响。
+///
+/// 只改**显示名**，`imap_name`（wire 名）原样存 —— SELECT/APPEND 都用它。
+pub fn pretty_folder_name(display_name: &str) -> String {
+    let name = display_name.trim();
+    let inner = name
+        .strip_prefix("[Gmail]/")
+        .or_else(|| name.strip_prefix("[Google Mail]/"))
+        .unwrap_or(name);
+    match inner.to_ascii_lowercase().as_str() {
+        "all mail" => "所有邮件".into(),
+        "sent mail" => "已发送".into(),
+        "drafts" => "草稿箱".into(),
+        "spam" => "垃圾邮件".into(),
+        "trash" | "bin" => "已删除".into(),
+        "important" => "重要".into(),
+        "starred" => "标星邮件".into(),
+        "unread" => "未读邮件".into(),
+        _ => inner.to_string(),
+    }
+}
+
 pub fn guess_folder_kind(imap_name: &str, display_name: &str) -> FolderKind {
     // 用 display_name 兜底：imap_name 可能是 modified UTF-7，没法直接匹配
     let name = if display_name.is_empty() {
@@ -791,7 +820,8 @@ pub fn guess_folder_kind(imap_name: &str, display_name: &str) -> FolderKind {
         (&["draft", "草稿", "草稿箱"], FolderKind::Drafts),
         (&["trash", "deleted", "垃圾箱", "已删除", "废纸篓"], FolderKind::Trash),
         (&["junk", "spam", "垃圾邮件", "垃圾郵件"], FolderKind::Junk),
-        (&["archive", "归档", "歸檔"], FolderKind::Archive),
+        // Gmail 的「所有邮件」就是归档语义（含全部信）
+        (&["archive", "归档", "歸檔", "all mail", "所有邮件"], FolderKind::Archive),
     ];
 
     for (keys, kind) in RULES {
@@ -830,4 +860,48 @@ pub fn reindex_bodies(store: &Store) -> Result<u32> {
         }
     }
     Ok(done)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gmail_system_folders_get_chinese_names() {
+        assert_eq!(pretty_folder_name("[Gmail]/All Mail"), "所有邮件");
+        assert_eq!(pretty_folder_name("[Gmail]/Sent Mail"), "已发送");
+        assert_eq!(pretty_folder_name("[Gmail]/Drafts"), "草稿箱");
+        assert_eq!(pretty_folder_name("[Gmail]/Spam"), "垃圾邮件");
+        assert_eq!(pretty_folder_name("[Gmail]/Trash"), "已删除");
+        assert_eq!(pretty_folder_name("[Gmail]/Important"), "重要");
+        // 用户标签原样
+        assert_eq!(pretty_folder_name("[Gmail]/Mailspring"), "Mailspring");
+    }
+
+    #[test]
+    fn non_gmail_names_pass_through() {
+        assert_eq!(pretty_folder_name("已发送"), "已发送"); // 163 等
+        assert_eq!(pretty_folder_name("INBOX"), "INBOX");
+        assert_eq!(pretty_folder_name("工作"), "工作");
+    }
+
+    #[test]
+    fn gmail_folders_classified() {
+        assert_eq!(
+            guess_folder_kind("[Gmail]/Sent Mail", "Sent Mail"),
+            FolderKind::Sent
+        );
+        assert_eq!(
+            guess_folder_kind("[Gmail]/All Mail", "All Mail"),
+            FolderKind::Archive
+        );
+        assert_eq!(
+            guess_folder_kind("[Gmail]/Spam", "Spam"),
+            FolderKind::Junk
+        );
+        assert_eq!(
+            guess_folder_kind("[Gmail]/Mailspring", "Mailspring"),
+            FolderKind::Normal
+        );
+    }
 }

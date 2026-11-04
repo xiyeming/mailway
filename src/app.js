@@ -1474,6 +1474,16 @@ async function openMessage(messageId) {
   }
 }
 
+/** 邮件里的链接：在系统浏览器里打开（后端有 scheme 白名单）。 */
+async function openExternal(url) {
+  try {
+    await invoke("open_external_url", { url });
+    statusNote("已在浏览器里打开链接");
+  } catch (err) {
+    statusNote(String(err instanceof Error ? err.message : err));
+  }
+}
+
 function renderReader() {
   const reader = clear(document.getElementById("reader"));
   const title = document.getElementById("reader-title");
@@ -1528,12 +1538,19 @@ function renderActiveItem(d) {
         allowed ? null : node("button", { type: "button", text: "显示图片", onclick: showRemoteImages }),
       );
     })() : null,
-    // 正文 —— 唯一的 innerHTML
+    // 正文 —— 唯一的 innerHTML。链接点击不开在 webview 里：拦下来交给
+    // 系统浏览器（正文是不可信输入，scheme 另有后端白名单把关）。
     (() => {
       const body = node("div", { class: `mail-body${d.body_kind === "plain" ? " is-plain" : ""}` });
       if (d.body_html && d.body_kind !== "plain") body.innerHTML = d.body_html;
       else if (d.body_text) body.textContent = d.body_text;
       else body.append(node("p", { class: "empty", text: "（这封邮件没有正文）" }));
+      body.addEventListener("click", (e) => {
+        const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+        if (!a || !body.contains(a)) return;
+        e.preventDefault(); // 别让 webview 导航走丢
+        openExternal(String(a.getAttribute("href") || ""));
+      });
       return body;
     })(),
     // 附件
@@ -2767,6 +2784,37 @@ function renderMailboxInfo(body, a) {
     settingRow("存储空间", "元数据在 SQLite、原文落盘", node("span", { class: "muted", text: "本地存储" })),
     settingRow("停用此邮箱", "停用后不参与收信", settingCheck(a.enabled !== false, (on) => setAccountEnabled(a, on))),
   );
+  // Google（OAuth）账号：令牌会过期 —— 提供「重新登录」升级成带
+  // refresh_token 的令牌包（后台此后自动续期）。
+  if (a.auth_type === "xoauth2") {
+    const reloginBtn = node("button", {
+      class: "btn", type: "button", text: "重新登录 Google",
+      onclick: () => googleRelogin(reloginBtn, a),
+    });
+    body.append(
+      settingRow("Google 登录", "令牌过期后重新授权（应用内弹窗）", reloginBtn),
+    );
+  }
+}
+
+/** 重新走一遍 Google 授权，把新令牌包写进钥匙串。格式同 tokens::pack。 */
+async function googleRelogin(btn, a) {
+  btn.disabled = true;
+  statusNote("正在打开 Google 授权…（应用内弹窗，授权完自动回来）");
+  try {
+    const token = await invoke("google_oauth_login");
+    const packed = JSON.stringify({
+      access: token.access_token,
+      refresh: token.refresh_token || "",
+      exp: Math.floor(Date.now() / 1000) + (token.expires_in || 3600) - 120,
+    });
+    await invoke("set_account_secret", { account_id: a.id, secret: packed });
+    statusNote("Google 已重新登录，令牌会自动续期");
+  } catch (err) {
+    statusNote(`Google 重新登录失败：${err instanceof Error ? err.message : err}`);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /** 签名：账号级，发信时拼在正文最后。 */
