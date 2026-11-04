@@ -1425,11 +1425,15 @@ body {
 }
 
 /* 弹出时切 fixed：逃出 `.reader` 的 overflow 裁剪与层叠（WebKitGTK 下
-   absolute 在滚动容器里会被正文压住）。坐标由 showMore 用 CSSOM 设。 */
+   absolute 在滚动容器里会被正文压住）。坐标由 showMore 用 CSSOM 设。
+   `translateZ(0)` 把它提升为自己的合成层 —— WebKitGTK 里滚动容器的滚动条
+   画在合成层上，会盖过同层叠上下文里**未合成**的 fixed 元素（实测右键菜单
+   被侧栏滚动条压住），层叠 z-index 管不了这事，得比层。 */
 .more-menu.is-fixed {
   position: fixed;
   left: auto;
   z-index: 1000;
+  transform: translateZ(0);
 }
 
 .more-item {
@@ -2006,6 +2010,7 @@ button:focus-visible,
   box-shadow: 0 12px 40px rgb(0 0 0 / 22%);
   /* 写信窗也是弹窗，盖住一切内容（同 .scrim） */
   z-index: 2000;
+  transform: translateZ(0);
 }
 
 .compose-head {
@@ -2358,8 +2363,10 @@ button:focus-visible,
   align-items: center;
   justify-content: center;
   background: rgb(0 0 0 / 30%);
-  /* 弹窗要盖住一切内容（reader-actions 50 / more-menu 100 / is-fixed 1000） */
+  /* 弹窗要盖住一切内容（reader-actions 50 / more-menu 100 / is-fixed 1000）。
+     translateZ(0) 同 `.more-menu.is-fixed`：躲开 WebKitGTK 滚动条合成层。 */
   z-index: 2000;
+  transform: translateZ(0);
   cursor: default;
 }
 
