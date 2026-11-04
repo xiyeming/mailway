@@ -6,7 +6,7 @@ members = ["core", "src-tauri"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/local/mailway"
+repository = "https://github.com/xiyeming/mailway"
 
 [workspace.dependencies]
 # 异步
