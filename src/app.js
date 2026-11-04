@@ -2694,6 +2694,8 @@ function renderSettingsSection(content, id) {
       node("h3", { class: "settings-sub", text: "邮件列表查看" }),
       settingRow("邮件按主题聚合", "同一主题的多封信折成一条", check("thread_aggregate", "on")),
       settingRow("显示发件人头像", "列表行显示发件人头像", check("show_avatars", "on")),
+      node("h3", { class: "settings-sub", text: "邮件正文" }),
+      settingRow("总是显示远程图片", "不拦截邮件里的外链图片（发件人可追踪已读，谨慎）", check("show_remote_images", "off")),
       node("h3", { class: "settings-sub", text: "文件夹列表查看" }),
       settingRow("显示快捷文件夹", "侧栏顶部显示快捷文件夹", check("show_quick_folders", "on")),
       node("h3", { class: "settings-sub", text: "回复 / 转发前缀" }),

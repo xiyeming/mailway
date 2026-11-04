@@ -1075,7 +1075,13 @@ pub fn open_message(state: State<'_, AppState>, message_id: i64) -> Result<Opene
     };
 
     let parsed = mime::parse_message(&raw).map_err(e)?;
-    let allow = state.remote_allowed(message_id);
+    // 逐封豁免（看过一次的）或全局「总是显示远程图片」都算放行。
+    let allow = state.remote_allowed(message_id)
+        || state
+            .store
+            .get_setting("show_remote_images")
+            .map(|v| v.as_deref() == Some("on"))
+            .unwrap_or(false);
 
     // `cid` 借着 `parsed.attachments`，所以必须在把 attachments 挪走之前用完。
     let sanitized: SanitizedBody = {

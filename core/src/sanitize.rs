@@ -16,6 +16,14 @@
 //! 2. **`data:` 只能对 `img src` 放行**。往 `url_schemes` 里加 `data` 会让
 //!    `<a href="data:text/html,<script>…">` 过关，点一下就执行。所以 href 上的
 //!    `data:` 必须单独掐掉。
+//!
+//! 内联样式（`style` 属性 + `<style>` 块）**放行但删减式清洗**（[`scrub_css`]）：
+//! HTML 邮件的排版全在内联 CSS 里，全剥掉就只剩裸文字（对不齐主流客户端）。
+//! 清洗是纯删除：`@import`/`expression(`/`position:fixed`/外呼 `url()` 一概
+//! 掏掉，不引入任何字节。`<style>` 文本的清洗发生在 ammonia 输出后按
+//! `</style>` 边界切段 —— 这是「不做事后修补」的唯一例外（那段只是文本、
+//! 不是结构，且解析器保证段内不含 `</style>`），只删不加。与 `tauri.conf.json`
+//! 的 CSP 成对：那边 `style-src` 需含 `'unsafe-inline'`（script 仍然没有）。
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -54,14 +62,15 @@ pub type CidMap<'a> = HashMap<&'a str, (&'a str, &'a [u8])>;
 /// ammonia 的默认白名单本来就不含这些，显式列一遍是为了让读代码的人不用翻
 /// 文档就知道边界在哪，也防止以后有人 `add_tags` 时误加回来。
 const FORBIDDEN_TAGS: &[&str] = &[
-    "script", "style", "iframe", "frame", "frameset", "object", "embed", "applet",
+    "script", "iframe", "frame", "frameset", "object", "embed", "applet",
     "form", "input", "button", "select", "option", "textarea", "fieldset", "legend",
     "link", "meta", "base", "title", "head", "html", "body", "svg", "math",
     "template", "noscript", "canvas", "audio", "video", "source", "track", "portal",
 ];
 
 /// 内容要连带丢掉的标签（不能只删标签留下里面的脚本）。
-const DROP_CONTENT_TAGS: &[&str] = &["script", "style"];
+/// `style` 不在此列：邮件排版靠它，内容经 [`scrub_css`] 删减式清洗。
+const DROP_CONTENT_TAGS: &[&str] = &["script"];
 
 /// 净化结果。
 #[derive(Debug, Clone)]
@@ -114,15 +123,21 @@ pub fn sanitize_body(raw: &str, allow_remote: bool, cid: &CidMap<'_>) -> Sanitiz
     b.rm_tags(FORBIDDEN_TAGS.iter().copied());
     // `clean_content_tags` 收 HashSet（整套替换），`add_clean_content_tags`
     // 才收迭代器（追加）。我们要的是追加。
-    b.add_clean_content_tags(DROP_CONTENT_TAGS.iter().copied());
+    // ⚠️ 用**整套替换**而不是 add_：ammonia 默认 clean_content_tags 里就有
+    // `style`（默认连内容丢），我们要保留 style 内容，必须清空重设。
+    b.clean_content_tags(DROP_CONTENT_TAGS.iter().copied().collect::<std::collections::HashSet<_>>());
 
-    // style 属性去掉：CSS 里能藏 url() 外呼，而邮件排版交给阅读视图的样式表。
-    //
-    // ⚠️ 这一行和 `src-tauri/tauri.conf.json` 的 CSP 是**成对的**：那边的
-    // `style-src` 只放行 `'self'`（没有 `'unsafe-inline'`），前提就是这里一直
-    // 把 style 属性和 `<style>` 块摘掉。哪天要给邮件 HTML 放行内联样式，
-    // 两边必须同时改，别只改一边。
-    b.rm_generic_attributes(&["style"]);
+    // `<style>` 放行（邮件排版靠它）。默认白名单不含，得显式加。
+    b.add_tags(&["style"]);
+
+    // style 属性**放行但清洗**：HTML 邮件的排版全在内联 CSS 里。清洗是
+    // 删减式（scrub_css）：@import / expression( / position:fixed / 外呼 url()
+    // 一概掏掉。⚠️ 和 tauri.conf.json 的 CSP 成对：style-src 需含
+    // 'unsafe-inline'，否则内联样式画不出来。
+
+    // ammonia 4 里 style 不在默认 generic_attributes（只有 lang/title）——
+    // 显式放行，值的清洗交给下面的 attribute_filter。
+    b.generic_attributes(["lang", "title", "style"].into_iter().collect());
 
     // 相对 URL 一律拒绝。邮件 HTML 里的相对链接没有合理语义（相对于什么？
     // 我们没有 base），放行只会变成盲猜。
@@ -134,6 +149,15 @@ pub fn sanitize_body(raw: &str, allow_remote: bool, cid: &CidMap<'_>) -> Sanitiz
     // 关键钩子：在这里拦远程图片，同时统计数量。
     b.attribute_filter(move |element, attribute, value| {
         let lower = value.to_ascii_lowercase();
+
+        // ---- style 属性：删减式 CSS 清洗 ------------------------------
+        if attribute == "style" {
+            return Some(Cow::Owned(scrub_css(
+                value,
+                allow_remote,
+                &counter_for_filter,
+            )));
+        }
 
         // ---- href 上的 data: 一律掐掉 --------------------------------
         // 加进 url_schemes 是为了 img，副作用是 <a href="data:text/html,…">
@@ -179,11 +203,176 @@ pub fn sanitize_body(raw: &str, allow_remote: bool, cid: &CidMap<'_>) -> Sanitiz
     });
 
     let html = b.clean(raw).to_string();
+    // `<style>` 文本清洗（删减式）—— 见模块头「唯一例外」。
+    let html = scrub_style_elements(&html, allow_remote, &counter);
     SanitizedBody {
         html,
         remote_image_count: counter.load(Ordering::Relaxed),
         remote_allowed: allow_remote,
     }
+}
+
+// ================================================================= CSS 清洗
+
+/// CSS **删减式**清洗：只删不加，不引入任何字节。用于 `style` 属性值与
+/// `<style>` 块文本。
+///
+/// 拦：`@import`（外呼 CSS 文件）、`expression(`/`-moz-binding`/`behavior:`
+/// （老 IE/FF 代码执行面）、`position: fixed|sticky`（防盖应用界面的钓鱼层；
+/// 另有 `.mail-body` 的合成层 containment 双保险）、`url()` 外呼地址
+/// （同 `<img>` 远程图策略：默认掏掉并计数；`data:` 不发网络请求，保留）。
+///
+/// 已知残余：CSS 转义（如 `u\\72 l(`）能绕过关键字扫描 —— 绕过的代价只是
+/// 一次后台请求（追踪像素级别），不涉代码执行；`position` 的绕过由
+/// `.mail-body` 的 containment 兜底。主流客户端同级。
+fn scrub_css(css: &str, allow_remote: bool, remote_counter: &AtomicUsize) -> String {
+    // 1) 去注释：注释里藏关键字是绕过手法
+    let mut s = String::with_capacity(css.len());
+    let bytes = css.as_bytes();
+    let (mut i, mut seg) = (0usize, 0usize);
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            s.push_str(&css[seg..i]);
+            let mut j = i + 2;
+            while j + 1 < bytes.len() && !(bytes[j] == b'*' && bytes[j + 1] == b'/') {
+                j += 1;
+            }
+            i = (j + 2).min(bytes.len());
+            seg = i;
+        } else {
+            i += 1;
+        }
+    }
+    s.push_str(&css[seg..]);
+
+    // 2) 关键字中和 + url() 分类（单趟扫描）
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let rest = &bytes[i..];
+        if ascii_starts_with_ci(rest, b"@import") {
+            out.push_str("@x-import"); // 未知 at-rule，浏览器丢弃
+            i += 7;
+        } else if ascii_starts_with_ci(rest, b"expression(") {
+            out.push_str("x-expression(");
+            i += 11;
+        } else if ascii_starts_with_ci(rest, b"-moz-binding") {
+            out.push_str("-x-moz-binding");
+            i += 11;
+        } else if ascii_starts_with_ci(rest, b"behavior:") {
+            out.push_str("x-behavior:");
+            i += 9;
+        } else if ascii_starts_with_ci(rest, b"position") {
+            // position: fixed|sticky → static；relative/absolute 等照留
+            let after = &bytes[i + 8..];
+            let mut k = 0;
+            while k < after.len() && (after[k] as char).is_ascii_whitespace() {
+                k += 1;
+            }
+            if k < after.len() && after[k] == b':' {
+                k += 1;
+                while k < after.len() && (after[k] as char).is_ascii_whitespace() {
+                    k += 1;
+                }
+                let vs = k;
+                while k < after.len() && (after[k].is_ascii_alphabetic() || after[k] == b'-') {
+                    k += 1;
+                }
+                let word = &after[vs..k];
+                if ascii_starts_with_ci(word, b"fixed") || ascii_starts_with_ci(word, b"sticky") {
+                    out.push_str("position: static");
+                    i += 8 + k;
+                    continue;
+                }
+            }
+            out.push_str("position");
+            i += 8;
+        } else if ascii_starts_with_ci(rest, b"url(") {
+            let mut k = i + 4;
+            while k < bytes.len() && (bytes[k] as char).is_ascii_whitespace() {
+                k += 1;
+            }
+            let quote = if k < bytes.len() && (bytes[k] == b'\'' || bytes[k] == b'"') {
+                let q = bytes[k];
+                k += 1;
+                Some(q)
+            } else {
+                None
+            };
+            let vstart = k;
+            while k < bytes.len() {
+                match quote {
+                    Some(q) if bytes[k] == q => break,
+                    None if bytes[k] == b')' || (bytes[k] as char).is_ascii_whitespace() => break,
+                    _ => k += 1,
+                }
+            }
+            let value = &s[vstart..k];
+            let lower = value.to_ascii_lowercase();
+            if lower.starts_with("data:") {
+                out.push_str(&s[i..k]);
+            } else if lower.starts_with("http://") || lower.starts_with("https://") {
+                if allow_remote {
+                    out.push_str(&s[i..k]);
+                } else {
+                    remote_counter.fetch_add(1, Ordering::Relaxed);
+                    out.push_str("none");
+                    while k < bytes.len() && bytes[k] != b')' {
+                        k += 1;
+                    }
+                }
+            } else {
+                out.push_str("none");
+                while k < bytes.len() && bytes[k] != b')' {
+                    k += 1;
+                }
+            }
+            i = k; // 指向右括号/结束，下轮把右括号原样带上
+        } else {
+            let ch_len = utf8_len(bytes[i]);
+            out.push_str(&s[i..i + ch_len]);
+            i += ch_len;
+        }
+    }
+    out
+}
+
+fn ascii_starts_with_ci(hay: &[u8], needle: &[u8]) -> bool {
+    hay.len() >= needle.len()
+        && hay[..needle.len()]
+            .iter()
+            .zip(needle)
+            .all(|(a, b)| a.to_ascii_lowercase() == *b)
+}
+
+/// 净化产物里 `<style>` 元素的文本过 [`scrub_css`]（删减式）。
+///
+/// 这是模块「不做事后修补」的**唯一例外**：只对 `<style>…</style>` 段内的
+/// 文本做删除式过滤，不碰任何标签/属性；且 ammonia 输出是解析器序列化的，
+/// 段内文本不可能含 `</style>`（解析器遇到就闭合了），字符串定位安全。
+fn scrub_style_elements(html: &str, allow_remote: bool, counter: &AtomicUsize) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(open) = rest.find("<style") {
+        let Some(tag_end_rel) = rest[open..].find('>') else {
+            out.push_str(rest);
+            return out;
+        };
+        let tag_end = open + tag_end_rel + 1;
+        out.push_str(&rest[..tag_end]);
+        if let Some(close) = rest[tag_end..].find("</style>") {
+            let body = &rest[tag_end..tag_end + close];
+            out.push_str(&scrub_css(body, allow_remote, counter));
+            out.push_str("</style>");
+            rest = &rest[tag_end + close + "</style>".len()..];
+        } else {
+            out.push_str(&rest[tag_end..]);
+            return out;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 // ================================================================= HTML → 文本
@@ -495,6 +684,52 @@ mod tests {
     }
 
     #[test]
+    fn keeps_inline_style_but_scrubs_dangerous_bits() {
+        let raw = r#"<div style="color:red; position:fixed; background:url(https://t.com/x.png); margin:4px">x</div>"#;
+        let out = sanitize_html(raw, false);
+        assert!(out.html.contains("margin"), "无害声明要留: {}", out.html);
+        assert!(out.html.contains("color:red"), "无害声明要留: {}", out.html);
+        assert!(!out.html.contains("position:fixed"), "fixed 必须中和: {}", out.html);
+        assert!(!out.html.contains("t.com"), "外呼 url() 必须掏掉: {}", out.html);
+        assert_eq!(out.remote_image_count, 1, "url() 外呼也要计数");
+    }
+
+    #[test]
+    fn style_block_survives_with_dangerous_bits_scrubbed() {
+        let raw = r#"<style>@import "http://evil.com/x.css"; .a{color:blue;position:STICKY;behavior:url(#x)}</style><p>x</p>"#;
+        let out = sanitize_html(raw, false);
+        assert!(out.html.contains("<style"), "style 块要留: {}", out.html);
+        assert!(out.html.contains("color:blue"), "无害规则要留: {}", out.html);
+        assert!(out.html.contains("@x-import"), "@import 必须中和: {}", out.html);
+        assert!(!out.html.contains("TICKY") && !out.html.contains("ticky"), "sticky 必须中和: {}", out.html);
+        assert!(!out.html.contains("behavior:url"), "behavior 必须中和: {}", out.html);
+    }
+
+    #[test]
+    fn css_comment_cannot_hide_keywords() {
+        let raw = r#"<div style="/* position:fixed */ color:green">x</div>"#;
+        let out = sanitize_html(raw, false);
+        // 注释整个删掉；即便绕过，留下的也只是文本
+        assert!(!out.html.contains("position:fixed"), "注释里的也要处理: {}", out.html);
+    }
+
+    #[test]
+    fn remote_url_kept_when_images_allowed() {
+        let raw = r#"<div style="background:url(https://cdn.example.com/bg.png)">x</div>"#;
+        let out = sanitize_html(raw, true);
+        assert!(out.html.contains("cdn.example.com"), "放行时 url() 要留: {}", out.html);
+        let out2 = sanitize_html(raw, false);
+        assert!(!out2.html.contains("cdn.example.com"), "拦截时 url() 要掏: {}", out2.html);
+    }
+
+    #[test]
+    fn css_data_url_survives_scrub() {
+        let raw = r#"<div style="background:url(data:image/gif;base64,R0lGOD)">x</div>"#;
+        let out = sanitize_html(raw, false);
+        assert!(out.html.contains("data:image/gif"), "data: 不发网络，保留: {}", out.html);
+    }
+
+    #[test]
     fn keeps_layout_tags() {
         let raw = r#"
             <h2>标题</h2>
@@ -517,11 +752,14 @@ mod tests {
     }
 
     #[test]
-    fn style_attribute_is_stripped() {
-        let raw = r#"<p style="background:url('http://evil.com/x')">text</p>"#;
+    fn style_attribute_is_scrubbed_not_stripped() {
+        // 行为变了（对齐主流客户端）：style 属性**保留**（邮件排版靠它），
+        // 但外呼 url() 掏掉、危险声明中和 —— 删减式清洗。
+        let raw = r#"<p style="background:url('http://evil.com/x'); color:red">text</p>"#;
         let out = sanitize_html(raw, false);
         assert!(!out.html.contains("evil.com"), "style 里的外呼必须消失: {}", out.html);
-        assert!(!out.html.contains("style="), "style 属性必须消失: {}", out.html);
+        assert!(out.html.contains("style="), "无害 style 该保留: {}", out.html);
+        assert!(out.html.contains("color:red"), "无害声明该保留: {}", out.html);
     }
 
     // ---------------------------------------------------------- html_to_text

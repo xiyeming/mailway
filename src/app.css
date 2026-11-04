@@ -1854,6 +1854,10 @@ button.thread-item:hover {
 /* 正文。这里是**唯一**允许 innerHTML 的地方，内容来自服务端净化器。 */
 .mail-body {
   overflow-wrap: anywhere;
+  /* containment：正文里 position:fixed 的元素跑不出这个盒子 ——
+     邮件 CSS 可能是恶意的（钓鱼盖层），这里结构性兜底（scrub_css 的
+     position 过滤是第一道，转义绕过也翻不出去）。 */
+  transform: translateZ(0);
 }
 
 .mail-body img {
