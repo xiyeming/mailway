@@ -103,75 +103,88 @@ pub fn list_folders(state: State<'_, AppState>, account_id: i64) -> Result<Vec<F
 
 /// 建文件夹。名字空不空是这里的事（交互规则）；编 mUTF-7、落库都在
 /// [`SyncEngine::create_folder`]。
+///
+/// 网络操作秒级起步 —— 丢进**阻塞线程池**，别占着 IPC 派发线程（主线程）：
+/// 同步命令在派发线程里内联跑，会把 busy DOM 的绘制卡住，前端 loading
+/// 只能等命令结束才「闪一下」。改名/删除/同步同理。
 #[tauri::command(rename_all = "snake_case")]
-pub fn create_folder(
+pub async fn create_folder(
     state: State<'_, AppState>,
     account_id: i64,
     name: String,
 ) -> Result<Folder, String> {
-    let name = name.trim();
+    let name = name.trim().to_string();
     if name.is_empty() {
         return Err("文件夹名不能空着".into());
     }
-    state
-        .pool
-        .with(account_id, |conn| {
-            SyncEngine::new(&state.store).create_folder(conn, account_id, name)
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    tauri::async_runtime::spawn_blocking(move || {
+        pool.with(account_id, |conn| {
+            SyncEngine::new(&store).create_folder(conn, account_id, &name)
         })
         .map_err(e)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 /// 改文件夹名。收件箱不给改 —— 协议里改 INBOX 是「搬空自己」的特殊语义，
 /// 我们没有这个交互，放出去只会让人莫名其妙丢箱子。
 #[tauri::command(rename_all = "snake_case")]
-pub fn rename_folder(
+pub async fn rename_folder(
     state: State<'_, AppState>,
     folder_id: i64,
     new_name: String,
 ) -> Result<Folder, String> {
-    let new_name = new_name.trim();
+    let new_name = new_name.trim().to_string();
     if new_name.is_empty() {
         return Err("文件夹名不能空着".into());
     }
-    let folder = state
-        .store
-        .get_folder(folder_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这个文件夹"))?;
-    if folder.kind == FolderKind::Inbox {
-        return Err("收件箱不能改名".into());
-    }
-    state
-        .pool
-        .with(folder.account_id, |conn| {
-            SyncEngine::new(&state.store).rename_folder(conn, &folder, new_name)
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = store
+            .get_folder(folder_id)
+            .map_err(e)?
+            .ok_or_else(|| not_found("这个文件夹"))?;
+        if folder.kind == FolderKind::Inbox {
+            return Err("收件箱不能改名".into());
+        }
+        pool.with(folder.account_id, |conn| {
+            SyncEngine::new(&store).rename_folder(conn, &folder, &new_name)
         })
         .map_err(e)?;
-    state
-        .store
-        .get_folder(folder_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这个文件夹"))
+        store
+            .get_folder(folder_id)
+            .map_err(e)?
+            .ok_or_else(|| not_found("这个文件夹"))
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 /// 删文件夹，箱里的信一起删。收件箱不给删（RFC 3501 §6.3.4 明文禁止）。
 ///「真的要删吗」是前端的两步确认，这里只管动手。
 #[tauri::command(rename_all = "snake_case")]
-pub fn delete_folder(state: State<'_, AppState>, folder_id: i64) -> Result<(), String> {
-    let folder = state
-        .store
-        .get_folder(folder_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这个文件夹"))?;
-    if folder.kind == FolderKind::Inbox {
-        return Err("收件箱不能删".into());
-    }
-    state
-        .pool
-        .with(folder.account_id, |conn| {
-            SyncEngine::new(&state.store).delete_folder(conn, &folder)
+pub async fn delete_folder(state: State<'_, AppState>, folder_id: i64) -> Result<(), String> {
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = store
+            .get_folder(folder_id)
+            .map_err(e)?
+            .ok_or_else(|| not_found("这个文件夹"))?;
+        if folder.kind == FolderKind::Inbox {
+            return Err("收件箱不能删".into());
+        }
+        pool.with(folder.account_id, |conn| {
+            SyncEngine::new(&store).delete_folder(conn, &folder)
         })
         .map_err(e)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 // ================================================================= 同步
@@ -231,80 +244,92 @@ impl SyncReport {
 /// 会真的连一次服务器，所以是**慢操作**（几百毫秒到几秒）。前端该转圈，
 /// 不要拿它当列表刷新用 —— 列表刷新读本地库就行。
 #[tauri::command(rename_all = "snake_case")]
-pub fn sync_account(state: State<'_, AppState>, account_id: i64) -> Result<SyncReport, String> {
-    let account = state
-        .store
-        .get_account(account_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这个账号"))?;
-    // POP3 走自己的同步（UIDL 增量，没有文件夹/标志概念）
-    if account.protocol == Protocol::Pop3 {
-        let password = tokens::effective_secret(&state.store, &account)
+pub async fn sync_account(state: State<'_, AppState>, account_id: i64) -> Result<SyncReport, String> {
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    tauri::async_runtime::spawn_blocking(move || {
+        let account = store
+            .get_account(account_id)
             .map_err(e)?
-            .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
-        let mut pop = mailway_core::pop3::Conn::for_account(&account, &password).map_err(e)?;
-        let out = SyncEngine::new(&state.store).sync_pop3(&mut pop, account.id);
-        pop.quit().ok();
-        return Ok(SyncReport::from_outs(vec![out.map_err(e)?]));
-    }
-    let outs = state
-        .pool
-        .with(account.id, |conn| {
-            SyncEngine::new(&state.store).sync_account(conn, account.id)
-        })
-        .map_err(e)?;
-    Ok(SyncReport::from_outs(outs))
+            .ok_or_else(|| not_found("这个账号"))?;
+        // POP3 走自己的同步（UIDL 增量，没有文件夹/标志概念）
+        if account.protocol == Protocol::Pop3 {
+            let password = tokens::effective_secret(&store, &account)
+                .map_err(e)?
+                .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
+            let mut pop = mailway_core::pop3::Conn::for_account(&account, &password).map_err(e)?;
+            let out = SyncEngine::new(&store).sync_pop3(&mut pop, account.id);
+            pop.quit().ok();
+            return Ok(SyncReport::from_outs(vec![out.map_err(e)?]));
+        }
+        let outs = pool
+            .with(account.id, |conn| {
+                SyncEngine::new(&store).sync_account(conn, account.id)
+            })
+            .map_err(e)?;
+        Ok(SyncReport::from_outs(outs))
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 /// 只同步一个文件夹。
 #[tauri::command(rename_all = "snake_case")]
-pub fn sync_folder(state: State<'_, AppState>, folder_id: i64) -> Result<FolderSyncInfo, String> {
-    let folder = state
-        .store
-        .get_folder(folder_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这个文件夹"))?;
-    // POP3：没有「单个服务器文件夹」可同步，整账号一轮（只会新增）
-    let account = state
-        .store
-        .get_account(folder.account_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这个账号"))?;
-    if account.protocol == Protocol::Pop3 {
-        let password = tokens::effective_secret(&state.store, &account)
+pub async fn sync_folder(state: State<'_, AppState>, folder_id: i64) -> Result<FolderSyncInfo, String> {
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = store
+            .get_folder(folder_id)
             .map_err(e)?
-            .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
-        let mut pop = mailway_core::pop3::Conn::for_account(&account, &password).map_err(e)?;
-        let out = SyncEngine::new(&state.store).sync_pop3(&mut pop, account.id);
-        pop.quit().ok();
-        return Ok(out.map_err(e)?.into());
-    }
-    let out = state
-        .pool
-        .with(folder.account_id, |conn| {
-            SyncEngine::new(&state.store).sync_folder(conn, folder.account_id, &folder)
-        })
-        .map_err(e)?;
-    Ok(out.into())
+            .ok_or_else(|| not_found("这个文件夹"))?;
+        // POP3：没有「单个服务器文件夹」可同步，整账号一轮（只会新增）
+        let account = store
+            .get_account(folder.account_id)
+            .map_err(e)?
+            .ok_or_else(|| not_found("这个账号"))?;
+        if account.protocol == Protocol::Pop3 {
+            let password = tokens::effective_secret(&store, &account)
+                .map_err(e)?
+                .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
+            let mut pop = mailway_core::pop3::Conn::for_account(&account, &password).map_err(e)?;
+            let out = SyncEngine::new(&store).sync_pop3(&mut pop, account.id);
+            pop.quit().ok();
+            return Ok(out.map_err(e)?.into());
+        }
+        let out = pool
+            .with(folder.account_id, |conn| {
+                SyncEngine::new(&store).sync_folder(conn, folder.account_id, &folder)
+            })
+            .map_err(e)?;
+        Ok(out.into())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 /// 只拉回这个文件夹的标志（已读 / 星标），**不取正文**。
 ///
 /// 「在手机上标了已读，电脑上还是未读」点一下就对上。返回被改动的封数。
 #[tauri::command(rename_all = "snake_case")]
-pub fn refresh_folder_flags(state: State<'_, AppState>, folder_id: i64) -> Result<u32, String> {
-    let folder = state
-        .store
-        .get_folder(folder_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这个文件夹"))?;
-    let n = state
-        .pool
-        .with(folder.account_id, |conn| {
-            SyncEngine::new(&state.store).refresh_flags(conn, &folder)
+pub async fn refresh_folder_flags(
+    state: State<'_, AppState>,
+    folder_id: i64,
+) -> Result<u32, String> {
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = store
+            .get_folder(folder_id)
+            .map_err(e)?
+            .ok_or_else(|| not_found("这个文件夹"))?;
+        pool.with(folder.account_id, |conn| {
+            SyncEngine::new(&store).refresh_flags(conn, &folder)
         })
-        .map_err(e)?;
-    Ok(n)
+        .map_err(e)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 /// 存（或换）一个账号的授权码。值进系统钥匙串，库里只留一个指路的 key。
@@ -1351,7 +1376,14 @@ pub struct NewAccountInput {
 /// 连一遍登录，不存任何东西。哪一步失败就报哪一步 —— 这就是「接上真实邮件
 /// 服务器」的当场验收，不用等后台同步去撞。
 #[tauri::command(rename_all = "snake_case")]
-pub fn test_account_login(input: NewAccountInput) -> Result<String, String> {
+pub async fn test_account_login(input: NewAccountInput) -> Result<String, String> {
+    // 真实网络登录（收发都试）—— 丢阻塞线程池，理由同 create_folder
+    tauri::async_runtime::spawn_blocking(move || test_account_login_blocking(input))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn test_account_login_blocking(input: NewAccountInput) -> Result<String, String> {
     let is_oauth = input.auth_type.as_deref() == Some("xoauth2");
 
     // ---- 收信 -------------------------------------------------------
@@ -1461,36 +1493,42 @@ pub struct SendResult {
 /// 先把草稿存一遍再发：**发出去的和留底的必须是同一份**，不能发完才发现
 /// 草稿里还是十分钟前的版本。收件人、正文、附件都从库里那一行读。
 #[tauri::command(rename_all = "snake_case")]
-pub fn send_message(state: State<'_, AppState>, draft: DraftInput) -> Result<SendResult, String> {
-    let draft = persist_draft(&state.store, &draft)?;
+pub async fn send_message(state: State<'_, AppState>, draft: DraftInput) -> Result<SendResult, String> {
+    let store = Arc::clone(&state.store);
+    // 发信 = SMTP + APPEND，秒级网络操作 —— 丢阻塞线程池，理由同 create_folder
+    tauri::async_runtime::spawn_blocking(move || send_message_blocking(&store, draft))
+        .await
+        .map_err(|err| err.to_string())?
+}
 
-    let account = state
-        .store
+fn send_message_blocking(store: &Store, draft: DraftInput) -> Result<SendResult, String> {
+    let draft = persist_draft(store, &draft)?;
+
+    let account = store
         .get_account(draft.account_id)
         .map_err(e)?
         .ok_or_else(|| not_found("这个账号"))?;
-    let password = tokens::effective_secret(&state.store, &account)
+    let password = tokens::effective_secret(store, &account)
         .map_err(e)?
         .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
 
     // 「已发送」的 **IMAP 名字**（可能是 modified UTF-7），不是显示名。
     // 服务器上没这个文件夹时是 `None`，发信照发，只是不留副本。
-    let sent_folder = state
-        .store
+    let sent_folder = store
         .list_folders(account.id)
         .map_err(e)?
         .into_iter()
         .find(|f| f.kind == FolderKind::Sent)
         .map(|f| f.imap_name);
 
-    let composer = composer_from_draft(&state.store, &account, &draft).map_err(e)?;
+    let composer = composer_from_draft(store, &account, &draft).map_err(e)?;
     let report =
         mailway_core::send::send_and_file(&account, &password, composer, sent_folder.as_deref())
             .map_err(e)?;
 
     // 只有自己也留了副本才删草稿。理由见 [`SendResult::draft_deleted`]。
     let draft_deleted = if report.saved_to_sent {
-        match state.store.delete_draft(draft.id) {
+        match store.delete_draft(draft.id) {
             Ok(()) => true,
             Err(err) => {
                 // 删不掉就留着：已发送里已经有副本了，多一份不碍事

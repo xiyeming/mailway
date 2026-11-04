@@ -822,22 +822,24 @@ function folderCtxDelete(folder) {
   }
   clearTimeout(folderDelTimer);
   folderDelArmed = false;
-  // 真删：菜单先变「处理中」（每趟都要新建 IMAP 连接，慢网下要几秒）
+  // 真删：菜单先变「处理中」（慢网下要几秒）
   const items = openFolderCtx ? [...openFolderCtx.querySelectorAll(".more-item")] : [];
   items.forEach((b) => (b.disabled = true));
   const delBtn = openFolderCtx?.querySelector("#folder-ctx-del");
   if (delBtn) delBtn.textContent = "正在删除…";
-  invoke("delete_folder", { folder_id: folder.id })
-    .then(() => {
-      closeFolderCtx();
-      return afterFolderChange(null);
-    })
-    .catch((err) => {
-      // 失败就恢复菜单，让用户重试或改点别的
-      items.forEach((b) => (b.disabled = false));
-      if (delBtn) delBtn.textContent = "删除";
-      statusNote(`删除失败：${err instanceof Error ? err.message : err}`);
-    });
+  nextFrame().then(() => {
+    invoke("delete_folder", { folder_id: folder.id })
+      .then(() => {
+        closeFolderCtx();
+        return afterFolderChange(null);
+      })
+      .catch((err) => {
+        // 失败就恢复菜单，让用户重试或改点别的
+        items.forEach((b) => (b.disabled = false));
+        if (delBtn) delBtn.textContent = "删除";
+        statusNote(`删除失败：${err instanceof Error ? err.message : err}`);
+      });
+  });
 }
 
 /** 增删改之后：重读文件夹、刷侧栏，选中停到 `selectId`（null=收件箱/第一个）。 */
@@ -895,6 +897,7 @@ function openFolderNameDialog(title, initial, onSubmit) {
     status.textContent = title.includes("重命名")
       ? "正在重命名…（连服务器，慢网时可能要几秒）"
       : "正在创建…（连服务器，慢网时可能要几秒）";
+    await nextFrame(); // busy 先上屏，再开网络请求
     try {
       await onSubmit(name);
       root.remove();
@@ -1493,6 +1496,11 @@ async function openMessage(messageId) {
     );
   }
 }
+
+/** 等一帧再干活：把 busy DOM 先画上屏，再发网络请求。
+ *  （后端已改 spawn_blocking 不堵主线程，这里是双保险 —— WebKitGTK 里
+ *  同任务内的 DOM 改动偶尔要一个合成帧才落屏。） */
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
 /** 邮件里的链接：在系统浏览器里打开（后端有 scheme 白名单）。 */
 async function openExternal(url) {
