@@ -92,7 +92,7 @@ function buildForm(onSaved) {
   // ---- 账号本身 -------------------------------------------------------
   const name = textInput("acc-name", "text", "发信时显示的名字");
   const email = textInput("acc-email", "email", "you@example.com");
-  const username = textInput("acc-user", "text", "登录用户名，多半就是邮箱");
+  // 用户名不再单独配置：各家都认「用户名 = 邮箱」，少一个必填项。
   // 授权码：见文件头。type=password 但它不是「登录密码」，见下面那行提示。
   const password = textInput("acc-pass", "password", "授权码");
 
@@ -172,10 +172,7 @@ function buildForm(onSaved) {
 
 
   // ---- 收信协议切换（IMAP / POP3，对照 wyemail 的收信类型选择）----------
-  const protoHint = node("p", {
-    class: "form-hint",
-    text: "POP3 只收信：已读/标星仅保存在本地；邮件保留在服务器上不删。",
-  });
+  const protoHint = node("p", { class: "form-hint", text: "" });
   const mkProtoBtn = (value, label) => {
     const b = node("button", {
       class: "btn proto-btn", type: "button", text: label,
@@ -184,13 +181,15 @@ function buildForm(onSaved) {
     b.dataset.value = value;
     return b;
   };
-  const protoRow = node("div", { class: "form-row" },
-    node("span", { class: "form-label", text: "收信协议" }),
-    node("div", { class: "form-radios", role: "group", "aria-label": "收信协议" },
+  // 一行式：[IMAP|POP3] + 主机 + 端口。切换协议时主机前缀/端口/提示跟着转。
+  const protoRow = node("div", { class: "form-row proto-line" },
+    node("div", { class: "form-radios proto-seg", role: "group", "aria-label": "收信协议" },
       mkProtoBtn("imap", "IMAP"),
       mkProtoBtn("pop3", "POP3"),
     ),
-    protoHint,
+    node("div", { class: "host-input" }, imapHost),
+    node("span", { class: "port-tag", text: "端口" }),
+    node("div", { class: "port-input" }, imapPort),
   );
   function setProto(value) {
     recvProto = value;
@@ -199,8 +198,18 @@ function buildForm(onSaved) {
       b.classList.toggle("is-on", on);
       b.setAttribute("aria-pressed", String(on));
     });
-    // 换协议就把收信主机/端口换成对应那套（手填过就不盖）
-    applyAutoconfig();
+    // 跟随协议转换：自动/占位主机换前缀 imap.↔pop.，端口按当前加密方式重置
+    const host = imapHost.value.trim();
+    if (/^(imap|pop)\./i.test(host)) {
+      imapHost.value = value === "pop3"
+        ? host.replace(/^imap\./i, "pop.")
+        : host.replace(/^pop\./i, "imap.");
+    }
+    imapHost.placeholder = value === "pop3" ? "pop.example.com" : "imap.example.com";
+    imapPort.value = String((value === "pop3" ? POP3_PORTS : IMAP_PORTS)[imapSec.value()]);
+    protoHint.textContent = value === "pop3"
+      ? "POP3 只收信：已读/标星仅本地保存，邮件保留在服务器上不删。"
+      : "IMAP 全功能：多文件夹，已读/星标同步到服务器。";
   }
   setProto("imap");
 
@@ -221,7 +230,7 @@ function buildForm(onSaved) {
       smtp_host: smtpHost.value.trim(),
       smtp_port: Number(smtpPort.value),
       smtp_security: smtpSec.value(),
-      username: username.value.trim() || email.value.trim(),
+      username: email.value.trim(), // 用户名 = 邮箱（见上）
       password: password.value,
       auth_type: authType,
       protocol: recvProto,
@@ -242,11 +251,10 @@ function buildForm(onSaved) {
 
   // 高级设置（默认收起）：用户名/协议/主机端口都在这里
   const adv = node("div", { class: "adv-box", hidden: true },
-    field("acc-user", "用户名", username),
     node("fieldset", { class: "form-group" },
       node("legend", { class: "form-legend", text: "收信" }),
       protoRow,
-      hostPortRow("收信主机", imapHost, "端口", imapPort),
+      protoHint,
       imapSec.el,
     ),
     node("fieldset", { class: "form-group" },

@@ -3092,3 +3092,32 @@ button:focus-visible,
 .adv-box[hidden] {
   display: none;
 }
+
+
+/* ================================ 添加账号：收信协议一行式 ============= */
+.proto-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.proto-seg {
+  flex-shrink: 0;
+}
+
+.proto-line .host-input {
+  flex: 1;
+  min-width: 10rem;
+}
+
+.proto-line .port-tag {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.proto-line .port-input {
+  flex-shrink: 0;
+  width: 5.25rem;
+}
