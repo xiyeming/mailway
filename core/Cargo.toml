@@ -1,0 +1,33 @@
+[package]
+name = "mailway-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "mailway 的协议与数据层：IMAP / MIME / 本地存储。纯 Rust，不依赖 GUI，可单测。"
+
+[dependencies]
+tokio.workspace = true
+futures.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+mailparse.workspace = true
+imap.workspace = true
+native-tls.workspace = true
+rusqlite.workspace = true
+ammonia.workspace = true
+encoding_rs.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "net", "time"] }
+tempfile = "3"
+# 集成测试要直接开一个「v1 的老库」来验迁移。光靠 mailway-core 的公开 API 建不出
+# 那种库（建库那条路本身就是新的），只能自己拿 rusqlite 拼一个。
+rusqlite.workspace = true
+# TLS 握手测试的自签证书。**只给测试用** —— 假 SMTP 服务器要一张证书才讲得了
+# TLS，而证书不该是仓库里写死的文件（会过期），现场造一张最省心。
+rcgen = "0.14"

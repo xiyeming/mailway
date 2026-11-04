@@ -1,0 +1,2959 @@
+/* mailway —— 三栏界面
+ *
+ * 一份普通的 CSS，没有构建步骤。
+ *
+ * 两条自己给自己定的规矩：
+ *
+ * 1. **不写内联 style。** CSP 的 `style-src` 只有 `'self'`，任何
+ *    `element.style.x = …` 都会被浏览器拒掉。动态值用 class 切换或
+ *    `data-*` 属性，不走 style。
+ * 2. **邮件正文只由 `.mail-body` 承载**，而且它里面的内容是服务端净化过
+ *    的 HTML。其它任何地方（主题、发件人、文件夹名）一律 `textContent`，
+ *    这样「哪里能进 HTML」在 CSS 上就是一眼可见的。
+ */
+
+:root {
+  --bg: #ffffff;
+  --bg-sunken: #f4f5f7;
+  --bg-hover: #eef0f4;
+  --bg-active: #e2e6ee;
+  --fg: #1c1f26;
+  --fg-muted: #6b7280;
+  --fg-faint: #9aa1ad;
+  --line: #e3e6ec;
+  --accent: #2f6feb;
+  --accent-fg: #ffffff;
+  --danger: #b42318;
+  --warn-bg: #fff8e6;
+  --warn-line: #f0d8a0;
+  --warn-fg: #7a5b12;
+
+  --pane-folders: 220px;
+  --pane-list: 360px;
+
+  --font: system-ui, -apple-system, "Noto Sans CJK SC", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius: 6px;
+
+  /* 统一标题栏/工具条基准（UI 矫正 B）：侧栏顶、列表头、阅读头、日历头、对话框头一条齐平 */
+  --head-h: 2.75rem;
+  --head-pad-x: 1rem;
+  --ctl-h: 2rem;
+
+  /* 原生表单控件（滚动条/下拉箭头/输入框底色）跟主题走。WebKitGTK 只认这个。 */
+  color-scheme: light;
+}
+
+/* 暗色主题（M5，参考 `:/dark/skin_window/`）。用 `data-theme` 属性切换，
+   只覆盖变量—— 不碰各处颜色，CSP `style-src 'self'` 也碰不了内联样式。 */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #171a20;
+  --bg-sunken: #12141a;
+  --bg-hover: #232833;
+  --bg-active: #2c3442;
+  --fg: #e7eaf0;
+  --fg-muted: #9aa4b2;
+  --fg-faint: #6b7482;
+  --line: #2a3038;
+  --accent: #4d8dff;
+  --accent-fg: #ffffff;
+  --danger: #f0716a;
+  --warn-bg: #2c2510;
+  --warn-line: #4a3d1a;
+  --warn-fg: #d9b46a;
+}
+
+/* 暗色下弹层阴影加深一点，浅色玻璃上不至于发灰。 */
+[data-theme="dark"] .more-menu,
+[data-theme="dark"] .suggest {
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+
+/* 列表头像那几个彩色底在暗色下仍要看得清字。 */
+[data-theme="dark"] .avatar {
+  color: #fff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+.boot {
+  color: var(--fg-muted);
+  padding: 2rem;
+}
+
+/* ============================================================ 三栏骨架 */
+
+.shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 舞台：按模式切布局（邮件三栏 / 联系人两栏 / 日历单栏）。 */
+.stage {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.shell.mode-mail .stage {
+  grid-template-columns: var(--pane-folders) var(--pane-list) 1fr;
+}
+
+.shell.mode-contacts .stage {
+  grid-template-columns: 20rem 1fr;
+}
+
+.shell.mode-calendar .stage {
+  grid-template-columns: 1fr;
+}
+
+/* ============================== 左侧图标栏（邮件/联系人/日历） */
+.rail {
+  width: 4.75rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.85rem 0.35rem;
+  border-right: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.rail-spacer {
+  flex: 1;
+}
+
+.rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  width: 3.9rem;
+  padding: 0.55rem 0.25rem;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.rail-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.rail-btn.is-active {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.rail-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.rail-label {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ============================== 通用：表单 / 按钮 / 键值 */
+.btn {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.06);
+}
+
+.btn-danger {
+  color: var(--danger);
+  border-color: var(--line);
+}
+
+.btn-danger:hover {
+  background: var(--warn-bg);
+}
+
+.btn-mini {
+  padding: 0.15rem 0.55rem;
+  font-size: 12px;
+}
+
+.btn-icon {
+  padding: 0.35rem 0.65rem;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.form-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.form-input {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.form-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0.85rem 0;
+}
+
+.kv {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.kv-k {
+  flex-shrink: 0;
+  width: 3.25rem;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+.kv-v {
+  color: var(--fg);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* ============================== 联系人 */
+/* 提高优先级压过后面的 `.search-box { flex: 0 1 11rem }` ——
+   那条 flex-basis 在纵向容器里会变成**高度**，把搜索框撑成一大块。 */
+.search-box.contact-search {
+  margin: 0.65rem;
+  width: calc(100% - 1.3rem);
+  flex: 0 0 auto;
+  height: 2.15rem;
+  min-width: 0;
+}
+
+.contact-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.contact-row:hover {
+  background: var(--bg-hover);
+}
+
+.contact-row.is-sel,
+.contact-row[aria-current="true"] {
+  background: var(--bg-active);
+}
+
+.contact-row .avatar {
+  width: 2.15rem;
+  height: 2.15rem;
+}
+
+.contact-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.contact-row-main .name {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-row-main .email {
+  font-size: 12px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-detail {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem;
+}
+
+.contact-card {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.contact-card .avatar {
+  width: 3.25rem;
+  height: 3.25rem;
+  font-size: 1.35rem;
+}
+
+.contact-name {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.contact-actions {
+  display: flex;
+  gap: 0.55rem;
+  margin-top: 1.15rem;
+  flex-wrap: wrap;
+}
+
+.contact-form,
+.event-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 26rem;
+}
+
+/* ============================== 日历 */
+.cal {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: var(--head-h);
+  padding: 0 var(--head-pad-x);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.cal-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.cal-spacer {
+  flex: 1;
+}
+
+.cal-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 20rem;
+}
+
+.cal-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.cal-wd {
+  padding: 0.45rem 0;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-faint);
+}
+
+.cal-days {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-auto-rows: 1fr;
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.35rem;
+  border: none;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  font: inherit;
+  color: inherit;
+}
+
+.cal-day:hover {
+  background: var(--bg-hover);
+}
+
+.cal-day.is-out {
+  background: var(--bg-sunken);
+  color: var(--fg-faint);
+}
+
+.cal-day.is-today .cal-daynum {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 50%;
+}
+
+.cal-day.is-sel {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.cal-daynum {
+  font-size: 12.5px;
+  font-weight: 600;
+  width: 1.55rem;
+  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cal-dots {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow: hidden;
+}
+
+.cal-dot {
+  font-size: 11px;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: var(--bg-active);
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-dot.is-allday {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.cal-more {
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+
+.cal-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-sunken);
+}
+
+.cal-events-title {
+  margin: 0;
+  padding: 0.85rem 1.15rem 0.35rem;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.cal-events {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.cal-event {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.cal-event-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.cal-event-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cal-event-time {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.cal-event-loc {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.cal-event-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+/* ============================== 撰写收件人自动补全 */
+.chips-wrap {
+  position: relative;
+}
+
+.suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin-top: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(28, 31, 38, 0.16);
+  overflow: hidden;
+}
+
+.suggest[hidden] {
+  display: none;
+}
+
+.suggest-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.45rem 0.75rem;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.suggest-item:hover {
+  background: var(--bg-hover);
+}
+
+.sg-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sg-email {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* 让 grid 子项能收缩，否则长主题会撑破栏宽 */
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.pane:last-child {
+  border-right: none;
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--head-h);
+  padding: 0 var(--head-pad-x);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pane-head .muted {
+  font-weight: 400;
+}
+
+/* 收信按钮 + 状态。放在中栏头部：收信是针对「这一屏」的动作。 */
+.btn-sync {
+  margin-left: auto;
+  padding: 0.25rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-sync:hover {
+  background: var(--bg-sunken);
+}
+
+.btn-sync:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 「全标已读」——列表头的小按钮。没未读就藏起来（`hidden`）。 */
+.btn-readall {
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-readall:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.btn-readall:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-readall[hidden] {
+  display: none;
+}
+
+/* 搜索框。跟标题挤在左边，「写邮件 / 收信」被 .btn-sync 的 margin-left 推到右边。 */
+.search-box {
+  flex: 0 1 11rem;
+  min-width: 5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.sync-status {
+  font-weight: 400;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.muted {
+  color: var(--fg-muted);
+}
+
+/* ============================================================ 左栏：文件夹 */
+
+/* 侧栏顶部：写信/收信 图标 + 搜索框（UI 矫正 B，对照原型侧栏顶）。 */
+.side-top {
+  padding: 0.55rem 0.75rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.side-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  height: var(--ctl-h);
+  padding: 0 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+}
+
+.side-actions .sync-status {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 侧栏搜索框占满一行（压过 `.search-box` 的 flex-basis）。 */
+.side-search {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  height: var(--ctl-h);
+}
+
+/* 每个账号一行，点一下就切过去。当前账号不靠颜色单打 —— 有底色，
+   也有 `aria-current`，键盘和读屏都问得出来。 */
+.account-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-row:hover {
+  background: var(--bg-hover);
+}
+
+.account-row[aria-current="true"] {
+  background: var(--bg-active);
+  font-weight: 600;
+}
+
+.account-row .name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-row .email {
+  color: var(--fg-muted);
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-list {
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder:hover {
+  background: var(--bg-hover);
+}
+
+.folder[aria-current="true"] {
+  background: var(--bg-active);
+  font-weight: 600;
+}
+
+.folder .count {
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 文件夹工具条：新建/重命名/删除。后两个对**选中的**文件夹动手，
+   收件箱和本地草稿箱禁用 —— 灰下去、title 也写明白，不靠颜色单打。 */
+.folder-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.btn-folder {
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.btn-folder:hover {
+  background: var(--bg-hover);
+}
+
+.btn-folder:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-folder:disabled:hover {
+  background: var(--bg);
+}
+
+/* 删除按钮。红字只是给「这是危险动作」提个醒，真正的闸门是两步确认
+   （见 app.js 的 `deleteSelectedFolder`）—— 颜色拦不住误触，流程才拦得住。 */
+.btn-folder.btn-danger {
+  color: var(--danger);
+}
+
+.btn-folder.btn-danger:hover {
+  background: var(--bg-hover);
+  border-color: var(--danger);
+}
+
+.folder-input {
+  flex: 1;
+  min-width: 6rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 12px;
+}
+
+.folder-status {
+  flex-basis: 100%;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* 来信分类：规则列表 + 就地新建。控件多但左栏窄，所以整块 flex-wrap，
+   一行放不下就换行 —— 别为了塞进一行把字号压到看不清。 */
+.rules-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.rules-head {
+  flex-basis: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.rules-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rule-row {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* 摘要一行省略号截断，完整内容在 title 里（规则名）——
+   左栏就 200px 上下，不截断整块就得跟着横滚。 */
+.rule-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-rule {
+  flex: none;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.btn-rule:hover {
+  background: var(--bg-hover);
+}
+
+.btn-rule[aria-pressed="false"] {
+  opacity: 0.55;
+}
+
+/* 删除不走两步确认：删的是规则本身，不动任何邮件，重建就是几下点击。
+   红字仍标一下「这是删除」。 */
+.btn-rule.btn-danger {
+  color: var(--danger);
+}
+
+.btn-rule.btn-danger:hover {
+  background: var(--bg-hover);
+  border-color: var(--danger);
+}
+
+.rules-foot {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* 新建表单：条件一行、动作一行。select 和 input 混排，宽度各随内容，
+   关键词/标签两个输入吃掉剩余宽度。 */
+.rule-form {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.rule-line {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.rule-label {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.rule-select {
+  flex: none;
+  max-width: 7rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: inherit;
+}
+
+.rule-value {
+  flex: 1 1 5rem;
+}
+
+.rule-check {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* ============================================================ 中栏：列表 */
+
+.message-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.row {
+  display: flex;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.65rem 1rem;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+.row.is-sel,
+.row[aria-current="true"] {
+  background: var(--bg-active);
+}
+
+.row.is-unread .from {
+  font-weight: 650;
+}
+
+.row .avatar {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+/* 第一行：未读点 + 发件人（参考图）。 */
+.row-l1 {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.dot.is-off {
+  background: transparent;
+}
+
+.row-l1 .from {
+  color: var(--fg);
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第二行：主题。 */
+.row .subject {
+  color: var(--fg);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第三行：摘要 + 状态小图标/标签 + 日期（日期靠右）。 */
+.row-l3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.row-l3 .preview {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.row-status .tag {
+  color: var(--fg-muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  max-width: 5.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-status .ic-star {
+  color: var(--warn-fg);
+}
+
+.row-status .ic-pin {
+  color: var(--accent);
+}
+
+.row-l3 .date {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ============================================================ 侧栏：快捷文件夹 + 账号树 */
+
+.side-sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem 0.25rem;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  letter-spacing: 0.02em;
+}
+
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.32rem 0.75rem;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.side-row:hover {
+  background: var(--bg-hover);
+}
+
+.side-row.is-active,
+.side-row[aria-current="true"] {
+  background: var(--bg-active);
+}
+
+.side-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.side-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-count {
+  flex-shrink: 0;
+  min-width: 1.15rem;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--accent);
+}
+
+.side-acct {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem 0.15rem;
+  min-width: 0;
+}
+
+/* 「邮箱」分区标题右的「＋」= 添加账号。 */
+.sec-add {
+  border: none;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.3rem;
+  border-radius: var(--radius);
+}
+
+.sec-add:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/* 账号行右侧「⋮」（删除账号）。 */
+.acct-more-wrap {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.acct-more {
+  height: 1.55rem;
+  padding: 0 0.35rem;
+  border-color: transparent;
+  color: var(--fg-muted);
+}
+
+.acct-more:hover {
+  border-color: var(--line);
+}
+
+.side-acct-name {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--fg);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.side-acct-mail {
+  font-size: 11px;
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ============================================================ 头像 + 读信工具条 */
+
+/* 发件人头像。配色由 JS 从预设里挑（`avatar-c0..7`），不写内联 style。 */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--bg-active);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
+.avatar-c0 { background: #4f6bed; }
+.avatar-c1 { background: #0f9d8f; }
+.avatar-c2 { background: #c2415f; }
+.avatar-c3 { background: #8a5cd6; }
+.avatar-c4 { background: #c77b2a; }
+.avatar-c5 { background: #2b8ac7; }
+.avatar-c6 { background: #d15b8f; }
+.avatar-c7 { background: #5a8f3c; }
+
+.avatar-draft { background: var(--fg-faint); }
+
+/* 信头里发件人那一行的小头像。 */
+.from-dd {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.from-dd .avatar {
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 0.85rem;
+}
+
+/* 读信工具条：回复 / 回复全部 / 转发 / 删除 / 置顶 / 更多▾。
+   抬高 z-index：里面的弹出菜单（更多▾/整理）要盖在正文之上。 */
+.reader-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0;
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  z-index: 50;
+}
+
+.ra-btn {
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ra-btn:hover {
+  background: var(--bg-hover);
+}
+
+.ra-btn.is-on {
+  background: var(--bg-active);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 「更多▾」下拉：绝对定位的浮层。 */
+.more-wrap {
+  position: relative;
+}
+
+.more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 100;
+  min-width: 11rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(28, 31, 38, 0.14);
+  display: flex;
+  flex-direction: column;
+}
+
+.more-menu[hidden] {
+  display: none;
+}
+
+/* 弹出时切 fixed：逃出 `.reader` 的 overflow 裁剪与层叠（WebKitGTK 下
+   absolute 在滚动容器里会被正文压住）。坐标由 showMore 用 CSSOM 设。 */
+.more-menu.is-fixed {
+  position: fixed;
+  left: auto;
+  z-index: 1000;
+}
+
+.more-item {
+  padding: 0.4rem 0.7rem;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.more-item:hover {
+  background: var(--bg-hover);
+}
+
+.more-item.is-danger {
+  color: var(--danger);
+}
+
+.more-item.is-danger:hover {
+  background: var(--warn-bg);
+}
+
+.more-sep {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--line);
+}
+
+.more-item.is-off {
+  color: var(--fg-faint);
+  cursor: default;
+}
+
+.more-item.is-off:hover {
+  background: none;
+}
+
+/* 列表头筛选图标（只看未读）。 */
+.btn-filter {
+  padding: 0.15rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn-filter:hover {
+  background: var(--bg-hover);
+}
+
+.btn-filter.is-on {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+/* 阅读页信头卡片：头像 + 发件人 + 日期 +「发至…」+「详情」（参考图）。 */
+.msg-head {
+  margin-bottom: 0.55rem;
+}
+
+.msg-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem 0 0.3rem;
+}
+
+.msg-card .avatar {
+  width: 2.4rem;
+  height: 2.4rem;
+}
+
+.msg-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.msg-l1 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+
+.msg-sender {
+  color: var(--fg);
+  font-weight: 650;
+  font-size: 14px;
+}
+
+.msg-date {
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+.msg-l2 {
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-cc {
+  color: var(--fg-faint);
+}
+
+.msg-side {
+  flex-shrink: 0;
+}
+
+.msg-details-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.msg-details-btn:hover {
+  text-decoration: underline;
+}
+
+.msg-onbehalf {
+  color: var(--fg-faint);
+  font-size: 12px;
+  margin: 0.25rem 0;
+}
+
+.msg-raw {
+  margin: 0.45rem 0;
+  padding: 0.6rem;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+/* 会话堆叠（阅读页，参考图 5/6）。 */
+.thread-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.55rem 0;
+}
+
+.thread-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* 折叠的那封：可点的行 */
+button.thread-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+button.thread-item:hover {
+  background: var(--bg-hover);
+}
+
+.thread-item .avatar {
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+}
+
+.thread-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.thread-item-top {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.thread-item-top .from {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-item-top .date {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.thread-item-main .preview {
+  font-size: 12px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-badge {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  font-size: 16px;
+}
+
+/* 展开的那封：完整正文 */
+.thread-item.is-open {
+  padding: 0.35rem 0.85rem 0.85rem;
+}
+
+/* 列表行的会话封数徽标（参考图 4 的「4」）。 */
+.thread-count {
+  flex-shrink: 0;
+  min-width: 1.2rem;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--accent);
+  background: var(--bg-active);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+}
+
+/* ============================================================ 右栏：阅读 */
+
+/* 标星 / 置顶 / 标签的工具条（阅读页信头底下）。
+   「开着」的状态不只靠颜色 —— 按钮文案也换（见 `renderMarkTools`）。 */
+.mark-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0;
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.tool-toggle {
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tool-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.tool-toggle.is-on {
+  background: var(--bg-active);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.label-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.1rem 0.25rem 0.1rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  font-size: 12px;
+}
+
+.chip-x {
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+}
+
+.chip-x:hover {
+  background: var(--bg-hover);
+  color: var(--danger);
+}
+
+.label-input {
+  width: 7rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.reader {
+  overflow-y: auto;
+  flex: 1;
+  padding: 1.25rem 1.75rem 3rem;
+}
+
+.empty {
+  color: var(--fg-faint);
+  padding: 3rem 0;
+  text-align: center;
+}
+
+.mail-subject {
+  margin: 0 0 0.75rem;
+  font-size: 1.35rem;
+  line-height: 1.35;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.mail-head {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0 0 1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.mail-head dt {
+  color: var(--fg-faint);
+}
+
+.mail-head dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 远程图片横幅 */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: 13px;
+}
+
+.banner button {
+  margin-left: auto;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--warn-fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.banner button:hover {
+  background: var(--bg-hover);
+}
+
+.banner.is-done {
+  border-color: var(--line);
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+}
+
+/* 正文。这里是**唯一**允许 innerHTML 的地方，内容来自服务端净化器。 */
+.mail-body {
+  overflow-wrap: anywhere;
+}
+
+.mail-body img {
+  max-width: 100%;
+  height: auto;
+}
+
+.mail-body a {
+  color: var(--accent);
+}
+
+.mail-body pre,
+.mail-body code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.mail-body blockquote {
+  margin: 0.75rem 0;
+  padding-left: 0.9rem;
+  border-left: 3px solid var(--line);
+  color: var(--fg-muted);
+}
+
+.mail-body table {
+  max-width: 100%;
+  border-collapse: collapse;
+}
+
+.mail-body td,
+.mail-body th {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+}
+
+/* 纯文本正文：保留原换行，但不撑破栏宽 */
+.mail-body.is-plain {
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
+.mail-attachments {
+  margin-top: 1.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.mail-attachments h2 {
+  margin: 0 0 0.6rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.attach {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 0.4rem;
+  font-size: 13px;
+}
+
+.attach .name {
+  overflow-wrap: anywhere;
+}
+
+.attach .meta {
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 详情折叠区 */
+.details {
+  margin-top: 1.25rem;
+  font-size: 12px;
+}
+
+.details summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+}
+
+.details pre {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ============================================================ 杂项 */
+
+button:focus-visible,
+.folder:focus-visible,
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.error {
+  padding: 1rem;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  border: 0;
+}
+
+/* 窄屏：退成两栏，阅读视图叠在列表上。够用就行，不追求移动端。 */
+@media (max-width: 1100px) {
+  .shell {
+    grid-template-columns: var(--pane-folders) 1fr;
+  }
+
+  .pane-reader {
+    display: none;
+  }
+
+  .shell.is-reading .pane-list {
+    display: none;
+  }
+
+  .shell.is-reading .pane-reader {
+    display: flex;
+    grid-column: 2;
+  }
+}
+
+/* ============================================================ 撰写窗口
+ *
+ * 浮层盖在三栏上，不是第四栏 —— 理由见 compose.js 顶部。
+ *
+ * 同样遵守本文件开头那两条：不写内联 style、除编辑区外一律 textContent。
+ */
+
+.compose {
+  position: fixed;
+  inset: 4vh 5vw;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 22%);
+  /* 写信窗也是弹窗，盖住一切内容（同 .scrim） */
+  z-index: 2000;
+}
+
+.compose-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--head-h);
+  padding: 0 var(--head-pad-x);
+  border-bottom: 1px solid var(--line);
+}
+
+.compose-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.compose-from {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.compose-fields {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.compose-field {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr;
+  align-items: start;
+  gap: 0.75rem;
+}
+
+.field-label {
+  padding-top: 0.35rem;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+.compose-subject {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 15px;
+  color: inherit;
+  background: var(--bg);
+}
+
+.compose-subject:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* ---- 收件人 chip ---- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.25rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.chips:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bg-active);
+  font-size: 13px;
+}
+
+/* 地址不合法就标出来。不拦着保存 —— 打字打到一半本来就不是个地址，
+   发送前才该拦。这里只是别让人看不见自己打错了。 */
+.chip.is-bad {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.chip-x {
+  border: none;
+  background: none;
+  padding: 0 0.15rem;
+  font: inherit;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+.chip-x:hover {
+  color: var(--danger);
+}
+
+.chip-input {
+  flex: 1;
+  min-width: 8rem;
+  border: none;
+  padding: 0.25rem;
+  font: inherit;
+  color: inherit;
+  background: none;
+}
+
+.chip-input:focus {
+  outline: none;
+}
+
+/* ---- 工具条 ---- */
+
+.compose-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.45rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.tool {
+  padding: 0.3rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.tool:hover {
+  background: var(--bg-hover);
+  border-color: var(--line);
+}
+
+.tool:first-child {
+  font-weight: 700;
+}
+
+.tool:nth-child(2) {
+  font-style: italic;
+}
+
+.tool:nth-child(3) {
+  text-decoration: underline;
+}
+
+.tool-gap {
+  width: 1px;
+  height: 1.25rem;
+  margin: 0 0.35rem;
+  background: var(--line);
+}
+
+/* ---- 编辑区 ---- */
+
+.compose-editor {
+  flex: 1;
+  min-height: 8rem;
+  overflow-y: auto;
+  padding: 1.1rem 1.25rem;
+  outline: none;
+  /* 纯文本草稿直接塞 textContent，换行靠这个保住 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.compose-editor:empty::before {
+  content: attr(aria-label);
+  color: var(--fg-faint);
+}
+
+.compose-editor blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.85rem;
+  border-left: 3px solid var(--line);
+  color: var(--fg-muted);
+}
+
+/* 回复/转发引用块（compose.js `buildQuote`，纯文本拼出来的）。 */
+.compose-editor .quote .quote-head {
+  color: var(--fg);
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+
+.compose-editor .quote .quote-note {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+
+.compose-editor table {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+.compose-editor td {
+  border: 1px solid var(--line);
+  padding: 0.35rem 0.55rem;
+  min-width: 3rem;
+}
+
+.compose-editor img {
+  max-width: 100%;
+}
+
+/* ---- 签名 / 附件 / 底栏 ---- */
+
+.compose-sig {
+  padding: 0.55rem 1.1rem;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.compose-sig summary {
+  cursor: pointer;
+}
+
+.compose-signature {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: var(--bg);
+  resize: vertical;
+}
+
+.compose-atts {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.compose-attachments {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.att .att-size {
+  font-size: 11px;
+}
+
+.compose-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.compose-status {
+  flex: 1;
+  font-size: 12px;
+}
+
+.btn {
+  padding: 0.42rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 发信这一类「就是要做这件事」的按钮。发送中会 disabled，所以 hover 要让路 */
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+.btn-danger {
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: var(--warn-bg);
+}
+
+/* ---- 草稿行 ---- */
+
+.row-draft .subject {
+  font-style: italic;
+}
+
+.badge-draft::before {
+  content: "✎ ";
+}
+
+/* 窄屏：撰写窗口别撑出屏幕 */
+@media (max-width: 1100px) {
+  .compose {
+    inset: 2vh 2vw;
+  }
+}
+
+/* ============================================================ 对话框：账号录入
+ *
+ * 和撰写窗口一样是浮层，但小得多 —— 这是「一次性填完就走」的表单，不是要
+ * 长时间待着的编辑器，所以缩在屏幕中间一小块，不铺满。
+ *
+ * 同样遵守本文件开头那两条：不写内联 style、除编辑区外一律 textContent。
+ */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 30%);
+  /* 弹窗要盖住一切内容（reader-actions 50 / more-menu 100 / is-fixed 1000） */
+  z-index: 2000;
+  cursor: default;
+}
+
+.dialog {
+  width: min(36rem, 92vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 22%);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: var(--head-h);
+  padding: 0 var(--head-pad-x);
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.dialog-body {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.05rem 1.15rem;
+}
+
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 1.15rem;
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.dialog-status {
+  flex: 1;
+  font-size: 12px;
+}
+
+/* ---- 表单 ---- */
+
+.form-grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+/* 主机 + 端口一行。端口列窄，别跟着主机一起拉满 */
+.form-row.is-split {
+  grid-template-columns: 5.5rem 1fr 2.5rem 5.5rem;
+}
+
+.form-label {
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 14px;
+  color: inherit;
+  background: var(--bg);
+}
+
+.form-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* 收信 / 发信两块。用 fieldset 是为了那两行单选有名字（legend 就是组名），
+   比外面套 div + aria-label 少一处会跟名字对不上的地方。 */
+.form-group {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.form-legend {
+  padding: 0 0.35rem;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  font-size: 13px;
+}
+
+.form-radios label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.form-hint {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+/* 左栏账号列表底下的按钮 + 一个账号都没有时中栏那块 */
+.account-chip .btn-account {
+  margin-top: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.account-chip .btn-account:hover {
+  background: var(--bg-hover);
+}
+
+/* 删除按钮。红字只是给「这是危险动作」提个醒，真正的闸门是两步确认
+   （见 app.js 的 `deleteActiveAccount`）—— 颜色拦不住误触，流程才拦得住。 */
+.account-chip .btn-danger {
+  color: var(--danger);
+}
+
+.account-chip .btn-danger:hover {
+  background: var(--bg-hover);
+  border-color: var(--danger);
+}
+
+.empty-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.55rem;
+  padding-top: 0.25rem;
+}
+
+
+/* ============================== 打印（M5）：只印阅读页正文 */
+@media print {
+  /* 藏掉一切壳/导航/列表/工具条，只留邮件内容 */
+  .rail,
+  .pane-folders,
+  .pane-list,
+  .reader-actions,
+  .mark-tools,
+  .more-wrap,
+  .msg-side,
+  .msg-details-btn,
+  .msg-raw,
+  .banner,
+  .thread-badge,
+  button.thread-item {
+    display: none !important;
+  }
+
+  .shell,
+  .stage,
+  .pane-reader,
+  .reader {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .mail-subject {
+    color: #000 !important;
+  }
+
+  .mail-body {
+    color: #000 !important;
+  }
+}
+
+/* ============================== 邮件模板管理（M6） */
+.tpl-dialog {
+  width: min(880px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.tpl-body {
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+  gap: 1rem;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tpl-list {
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  padding-right: 0.75rem;
+}
+
+.tpl-row.is-sel {
+  background: var(--bg-active);
+  border-radius: var(--radius);
+}
+
+.tpl-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.tpl-pick:hover {
+  background: var(--bg-hover);
+}
+
+.tpl-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tpl-subj {
+  font-size: 12px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tpl-form {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tpl-form-title {
+  margin: 0;
+}
+
+/* ============================== 设置（M5/M6） */
+.settings {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 左侧分区导航（对照原型）。 */
+.settings-nav {
+  width: 10rem;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 1rem 0.65rem;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.settings-nav-item {
+  padding: 0.45rem 0.75rem;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.settings-nav-item.is-active,
+.settings-nav-item[aria-current="true"] {
+  background: var(--bg-active);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1.25rem 1.75rem 3rem;
+}
+
+.settings-title {
+  margin: 0 0 0.85rem;
+  font-size: 1.25rem;
+}
+
+.settings-sub {
+  margin: 1.15rem 0 0.25rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-faint);
+}
+
+.setting-select {
+  min-width: 11rem;
+}
+
+.setting-field {
+  min-width: 11rem;
+}
+
+.settings-sec {
+  margin: 1.5rem 0 0.35rem;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.settings-sec:first-child {
+  margin-top: 0;
+}
+
+/* 关了「显示头像」时的素圈占位。 */
+.avatar-none {
+  background: var(--bg-active);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.setting-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.setting-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.setting-desc {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* 分段选择（主题 明/暗）。 */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.seg-btn {
+  padding: 0.35rem 0.9rem;
+  border: none;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.seg-btn + .seg-btn {
+  border-left: 1px solid var(--line);
+}
+
+.seg-btn:hover {
+  background: var(--bg-hover);
+}
+
+.seg-btn.is-on {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* 开关。 */
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  cursor: pointer;
+  align-items: center;
+}
+
+.switch-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}
+
+.switch-ui {
+  width: 2.55rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  background: var(--bg-active);
+  border: 1px solid var(--line);
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.switch-ui::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.45rem - 6px);
+  height: calc(1.45rem - 6px);
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  transition: transform 0.15s ease;
+}
+
+.switch-input:checked + .switch-ui {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch-input:checked + .switch-ui::after {
+  transform: translateX(1.1rem);
+}
+
+.switch-input:focus-visible + .switch-ui {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settings-about {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 0;
+}
+
+.settings-about p {
+  margin: 0;
+}
+
+/* ============================== 邮箱设置（每账号 tab，对照 wyemail） */
+.mailbox-wrap {
+  display: grid;
+  grid-template-columns: 15rem 1fr;
+  gap: 1.15rem;
+  min-height: 0;
+}
+
+.mailbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.mailbox-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  min-width: 0;
+}
+
+.mailbox-item:hover {
+  background: var(--bg-hover);
+}
+
+.mailbox-item.is-sel {
+  border-color: var(--accent);
+  background: var(--bg-active);
+}
+
+.mailbox-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailbox-mail {
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailbox-add {
+  margin-top: 0.35rem;
+  align-self: flex-start;
+}
+
+.mailbox-panel {
+  min-width: 0;
+}
+
+.mailbox-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.85rem;
+}
+
+.mailbox-tab {
+  padding: 0.5rem 0.9rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mailbox-tab:hover {
+  color: var(--fg);
+}
+
+.mailbox-tab.is-on {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.mailbox-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-width: 34rem;
+}
+
+.mailbox-sig {
+  resize: vertical;
+  min-height: 8rem;
+}

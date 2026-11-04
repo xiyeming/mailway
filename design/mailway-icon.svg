@@ -1,0 +1,47 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Mailway 应用图标（原创）。
+    仅借鉴「圆角扁平 + 单色主体」的通用风格；不使用网易邮箱大师的红圆+M（其商标）。
+    概念：Mail(信封) + Way(前进/路径)。蓝紫渐变，明显区别于网易红。
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="55%" stop-color="#4F6BF6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#DCE4FF"/>
+    </linearGradient>
+    <linearGradient id="flap" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EEF2FF"/>
+      <stop offset="100%" stop-color="#C7D2FE"/>
+    </linearGradient>
+    <clipPath id="envClip">
+      <rect x="116" y="196" width="268" height="164" rx="24"/>
+    </clipPath>
+  </defs>
+
+  <!-- 圆角方形（squircle）背景 -->
+  <rect x="0" y="0" width="512" height="512" rx="128" fill="url(#bg)"/>
+
+  <!-- 信封主体 -->
+  <rect x="116" y="196" width="268" height="164" rx="24" fill="url(#paper)"/>
+
+  <!-- 信封翻盖（三角，压在主体上，略浅） -->
+  <g clip-path="url(#envClip)">
+    <path d="M116 196 L250 302 L384 196 Z" fill="url(#flap)"/>
+  </g>
+
+  <!-- 翻盖折线（V），用背景色描边形成「开口」 -->
+  <path d="M116 196 L250 302 L384 196" fill="none" stroke="url(#bg)" stroke-width="16"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 「Way」前进感：一枚纸飞机从信封上方飞出 -->
+  <g transform="translate(278 96) rotate(-30)">
+    <path d="M0 0 L118 52 L0 104 L26 52 Z" fill="#FFFFFF"/>
+    <path d="M0 0 L118 52 L0 104 L26 52 Z" fill="none" stroke="url(#bg)" stroke-width="3" opacity="0.18"/>
+    <path d="M26 52 L118 52" stroke="url(#bg)" stroke-width="3" opacity="0.18"/>
+  </g>
+</svg>

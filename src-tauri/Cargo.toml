@@ -1,0 +1,38 @@
+[package]
+name = "mailway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "mailway —— 原生 Wayland 邮件客户端（Tauri 2 应用壳）"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mailway-core = { path = "../core" }
+tauri = { version = "2", features = ["tray-icon"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+# 附件内容走 IPC 时是 base64。不用 `Vec<u8>`：Tauri 对二进制参数走哪条传输
+# 跟版本和前端写法都有关，base64 明确、可读、坏了也一眼看得出是编码问题。
+base64.workspace = true
+sha2 = "0.10" # Google OAuth PKCE（S256）的 code_challenge
+
+# 授权码只存在 keyring 里：不进 SQLite、不进日志、不进命令行参数。
+# 走 freedesktop Secret Service（gnome-keyring / KWallet 提供的
+# org.freedesktop.secrets），和主流 Linux 桌面一致。
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+# 新信桌面通知：走 org.freedesktop.Notifications（DBus），与 GNOME/KDE 一致。
+notify-rust = "4"
+
+# Google OAuth 换 token 用（HTTPS POST）。轻量、默认 rustls。
+ureq = "2"
+
+[features]
+default = []

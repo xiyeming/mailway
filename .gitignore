@@ -1,0 +1,28 @@
+# 构建产物
+/target
+**/target
+
+# 密钥：Google OAuth 真实凭据（编译期注入，不入库）
+/.cargo/config.toml
+
+# IP 红线：网易邮箱大师的 UI 截图 / logo 仅用于功能分析，不公开托管
+/网易邮箱大师ui截图/
+
+# 截图 / 大文件：只推代码 + 文档 + 图标
+screens/
+*.log
+.DS_Store
+node_modules/
+
+# 工作过程记录 / 本地资料（不入库；仅本地保留）
+/m0/
+/m1/
+/m2/
+/m3/
+/m4/
+/m5/
+/m6/
+/进度与待办.md
+/mailway-重写方案.md
+/pi-bug-report-*.zip
+/pi-pug-report*
