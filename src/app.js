@@ -822,10 +822,22 @@ function folderCtxDelete(folder) {
   }
   clearTimeout(folderDelTimer);
   folderDelArmed = false;
-  closeFolderCtx();
+  // 真删：菜单先变「处理中」（每趟都要新建 IMAP 连接，慢网下要几秒）
+  const items = openFolderCtx ? [...openFolderCtx.querySelectorAll(".more-item")] : [];
+  items.forEach((b) => (b.disabled = true));
+  const delBtn = openFolderCtx?.querySelector("#folder-ctx-del");
+  if (delBtn) delBtn.textContent = "正在删除…";
   invoke("delete_folder", { folder_id: folder.id })
-    .then(() => afterFolderChange(null))
-    .catch((err) => statusNote(`删除失败：${err instanceof Error ? err.message : err}`));
+    .then(() => {
+      closeFolderCtx();
+      return afterFolderChange(null);
+    })
+    .catch((err) => {
+      // 失败就恢复菜单，让用户重试或改点别的
+      items.forEach((b) => (b.disabled = false));
+      if (delBtn) delBtn.textContent = "删除";
+      statusNote(`删除失败：${err instanceof Error ? err.message : err}`);
+    });
 }
 
 /** 增删改之后：重读文件夹、刷侧栏，选中停到 `selectId`（null=收件箱/第一个）。 */
@@ -852,25 +864,48 @@ async function reloadFolders() {
   );
 }
 
-/** 新建/重命名的小对话框：Enter 确定、Esc/点外面 关闭。 */
+/** 新建/重命名的小对话框：Enter 确定、Esc/点外面 关闭。
+ *  提交期间**禁用按钮 + 显示进行中**——每个操作都要新建 IMAP 连接（TLS 握手
+ *  + LOGIN + 往返），代理/慢网下要好几秒，没有反馈就像卡死。 */
 function openFolderNameDialog(title, initial, onSubmit) {
   const input = node("input", {
     class: "form-input", type: "text", value: initial ?? "",
     placeholder: "文件夹名", "aria-label": "文件夹名",
   });
   const status = node("p", { class: "muted", text: "" });
-  const close = () => root.remove();
+  let busy = false;
+  const close = () => {
+    if (busy) return;
+    root.remove();
+  };
+  const okBtn = node("button", { class: "btn btn-primary", type: "submit", text: "确定" });
+  const cancelBtn = node("button", { class: "btn", type: "button", text: "取消", onclick: close });
   const submit = async () => {
+    if (busy) return;
     const name = input.value.trim();
     if (!name) {
       status.textContent = "文件夹名不能空着";
       return;
     }
+    busy = true;
+    input.disabled = true;
+    okBtn.disabled = true;
+    cancelBtn.disabled = true;
+    okBtn.textContent = "请稍候…";
+    status.textContent = title.includes("重命名")
+      ? "正在重命名…（连服务器，慢网时可能要几秒）"
+      : "正在创建…（连服务器，慢网时可能要几秒）";
     try {
       await onSubmit(name);
-      close();
+      root.remove();
     } catch (err) {
+      busy = false;
+      input.disabled = false;
+      okBtn.disabled = false;
+      cancelBtn.disabled = false;
+      okBtn.textContent = "确定";
       status.textContent = String(err instanceof Error ? err.message : err);
+      input.focus();
     }
   };
   input.addEventListener("keydown", (ev) => {
@@ -890,10 +925,7 @@ function openFolderNameDialog(title, initial, onSubmit) {
     },
       node("header", { class: "dialog-head" }, node("h2", { class: "dialog-title", text: title })),
       node("div", { class: "dialog-body" }, input, status),
-      node("footer", { class: "dialog-foot" },
-        node("button", { class: "btn", type: "button", text: "取消", onclick: close }),
-        node("button", { class: "btn btn-primary", type: "submit", text: "确定" }),
-      ),
+      node("footer", { class: "dialog-foot" }, cancelBtn, okBtn),
     ),
   );
   root.addEventListener("mousedown", (ev) => { if (ev.target === root) close(); });
