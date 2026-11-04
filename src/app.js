@@ -41,8 +41,6 @@ const state = {
   folderId: null,
   messageId: null,
   detail: null,
-  /** 文件夹工具条的「正在新建/改名」状态，见 `renderFolderTools`。 */
-  folderOp: null,
   /** 来信分类规则（每账号），在设置→邮箱设置→来信分类里管理。 */
   rules: [],
   /** 规则表单开着没（就地一行，同文件夹那套）。 */
@@ -181,8 +179,6 @@ async function useAccount(account) {
   state.detail = null;
   state.messages = [];
   state.drafts = [];
-  // 半截的「新建/改名」表单不跟账号走：那是在**上一个**账号上起的头
-  state.folderOp = null;
   // 半截的规则表单同理
   state.ruleOp = false;
   // 搜索也是上一个账号的搜索：结果是按 account_id 查的，留着会串台
@@ -398,7 +394,6 @@ function buildMail(stage) {
         }),
       ),
       node("nav", { class: "folder-list", id: "folders", "aria-label": "文件夹" }),
-      node("div", { class: "folder-tools", id: "folder-tools", "aria-label": "文件夹管理" }),
     ),
     node("section", { class: "pane pane-list" },
       node("header", { class: "pane-head" },
@@ -599,7 +594,7 @@ const ACCOUNT_SMART = [
 ];
 const FOLDER_ICON = { inbox: "📥", sent: "📤", drafts: "📄", junk: "🗑", trash: "🗑", archive: "📦", normal: "📁" };
 
-function sidebarRow({ key, icon, name, count = 0, onclick }) {
+function sidebarRow({ key, icon, name, count = 0, onclick, ctx }) {
   return node(
     "button",
     {
@@ -607,6 +602,7 @@ function sidebarRow({ key, icon, name, count = 0, onclick }) {
       type: "button",
       "aria-current": state.activeKey === key ? "true" : "false",
       onclick,
+      ...(ctx ? { oncontextmenu: ctx } : {}),
     },
     node("span", { class: "side-icon", text: icon }),
     node("span", { class: "side-name", text: name }),
@@ -646,7 +642,11 @@ function renderSidebar() {
   );
   for (const a of state.accounts) {
     box.append(
-      node("div", { class: "side-acct" },
+      node("div", {
+        class: "side-acct",
+        // 右键账号行 = 这个账号下新建文件夹
+        oncontextmenu: (e) => openFolderCtxMenu(e, a, null),
+      },
         node("span", { class: "side-acct-name", text: a.name || a.email }),
         node("span", { class: "side-acct-mail", text: a.email }),
         accountMenu(a),
@@ -663,6 +663,8 @@ function renderSidebar() {
           name: f.display_name,
           count: folderUnread(f.id),
           onclick: () => selectFolder(f.id),
+          // 右键文件夹行 = 新建/重命名/删除
+          ctx: (e) => openFolderCtxMenu(e, a, f),
         }),
       );
       if (f.kind === "inbox" && !smartDone) {
@@ -693,7 +695,6 @@ function renderSidebar() {
       );
     }
   }
-  renderFolderTools();
 }
 
 /** 打开智能箱 / 快捷箱。`account_id=null` = 跨账号聚合（快捷）。 */
@@ -723,195 +724,177 @@ async function openSmart(filter, account_id, title, isDrafts) {
 }
 
 // ---------------------------------------------------------------- 文件夹管理
+//
+// 新建 / 重命名 / 删除走**文件夹右键菜单**（对照 wyemail）：右键侧栏里的
+// 文件夹行（或账号行）弹出操作菜单。收件箱和本地草稿箱（id: 0）不给改名/删
+// —— RFC 3501 §6.3.4 收件箱不可删，改名是「搬空自己」的特殊语义。
+// 「新建/改名」用小对话框输入名字（Enter 确定 / Esc 取消），不用 prompt()；
+// 删除是**两步确认**（菜单项就地变「再点一次确认删除」，五秒内第二下才动手）。
 
-/** [`deleteSelectedFolder`] 的「已经点过一次」状态和它的复位定时器。 */
+let openFolderCtx = null;
 let folderDelArmed = false;
 let folderDelTimer = 0;
 
-/**
- * 文件夹工具条：新建 / 重命名 / 删除。
- *
- * 重命名和删除只对**选中的服务器文件夹**开：本地草稿箱（`id: 0`）没有服务器
- * 一端，收件箱按 RFC 3501 §6.3.4 就不许删，改名也是「搬空自己」的特殊语义。
- * 按钮禁用不只靠灰 —— 也写在 `title` 里。
- *
- * 「新建/改名」时就地换成一行输入框（Enter 确定、Esc 取消）：文件夹名就几个
- * 字，为它弹一层窗口不值当，而且 WebKitGTK 的弹窗是 M0 踩过的那套。
- */
-function renderFolderTools() {
-  // 重画就是新按钮，上一个「确认中」不该跟着过来 —— 那等于对新目标一击即删
-  folderDelArmed = false;
+function closeFolderCtx() {
+  if (!openFolderCtx) return;
   clearTimeout(folderDelTimer);
+  folderDelArmed = false;
+  openFolderCtx.remove();
+  openFolderCtx = null;
+}
 
-  const box = document.getElementById("folder-tools");
-  if (!box) return;
-  clear(box);
-  if (!state.account) return;
+document.addEventListener("click", () => closeFolderCtx());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeFolderCtx();
+});
 
-  const status = node("span", { class: "muted folder-status", id: "folder-status" });
-
-  const op = state.folderOp;
-  if (op) {
-    const current =
-      op.mode === "rename" ? state.folders.find((f) => f.id === op.folderId) : null;
-    const input = node("input", {
-      class: "folder-input",
-      id: "folder-name",
-      type: "text",
-      value: current ? current.display_name : "",
-      placeholder: "文件夹名",
-      "aria-label": "文件夹名",
-      onkeydown: (ev) => {
-        if (ev.key === "Enter") {
-          ev.preventDefault();
-          submitFolderOp();
-        } else if (ev.key === "Escape") {
-          ev.preventDefault();
-          cancelFolderOp();
-        }
+/** 右键文件夹/账号行：光标处弹操作菜单。`folder=null` = 账号行（只有新建）。 */
+function openFolderCtxMenu(e, account, folder) {
+  e.preventDefault();
+  e.stopPropagation();
+  closeFolderCtx();
+  const canManage = !!folder && folder.id !== 0 && folder.kind !== "inbox";
+  const menu = node("div", { class: "more-menu is-fixed", role: "menu" });
+  // 菜单里的点击别冒泡到 document —— 外面那句「点任意处关菜单」会把
+  // 两步确认打断（第一下待命时菜单就被关了）。需要关的时候各动作自己关。
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  menu.append(
+    node("button", {
+      class: "more-item", type: "button", role: "menuitem", text: "新建文件夹",
+      onclick: () => {
+        closeFolderCtx();
+        openFolderNameDialog("新建文件夹", "", async (name) => {
+          const f = await invoke("create_folder", { account_id: account.id, name });
+          await afterFolderChange(f.id);
+        });
       },
-    });
-    box.append(
-      input,
+    }),
+  );
+  if (folder) {
+    menu.append(
       node("button", {
-        class: "btn-folder",
-        type: "button",
-        id: "btn-folder-ok",
-        text: "确定",
-        onclick: submitFolderOp,
+        class: `more-item${canManage ? "" : " is-off"}`, type: "button", role: "menuitem",
+        text: "重命名",
+        title: canManage ? "改这个文件夹的名字" : "收件箱和本地草稿箱不能改名",
+        disabled: canManage ? null : true,
+        onclick: () => {
+          closeFolderCtx();
+          openFolderNameDialog("重命名文件夹", folder.display_name, async (name) => {
+            await invoke("rename_folder", { folder_id: folder.id, new_name: name });
+            await afterFolderChange(folder.id);
+          });
+        },
       }),
       node("button", {
-        class: "btn-folder",
-        type: "button",
-        text: "取消",
-        onclick: cancelFolderOp,
+        class: `more-item is-danger${canManage ? "" : " is-off"}`, type: "button",
+        role: "menuitem", id: "folder-ctx-del", text: "删除",
+        title: canManage ? "删掉这个文件夹，里面的信一起删" : "收件箱和本地草稿箱不能删",
+        disabled: canManage ? null : true,
+        onclick: () => folderCtxDelete(folder),
       }),
-      status,
     );
-    input.focus();
-    input.select();
-    return;
   }
-
-  const folder = state.folders.find((f) => f.id === state.folderId);
-  const isServer = !!folder && folder.id !== 0;
-  const canManage = isServer && folder.kind !== "inbox";
-  box.append(
-    node("button", {
-      class: "btn-folder",
-      type: "button",
-      id: "btn-folder-new",
-      text: "新建文件夹",
-      onclick: () => {
-        state.folderOp = { mode: "create" };
-        renderFolderTools();
-      },
-    }),
-    node("button", {
-      class: "btn-folder",
-      type: "button",
-      id: "btn-folder-rename",
-      text: "重命名",
-      title: canManage ? "改这个文件夹的名字" : "先选一个服务器上的文件夹（收件箱除外）",
-      disabled: canManage ? null : true,
-      onclick: () => {
-        state.folderOp = { mode: "rename", folderId: state.folderId };
-        renderFolderTools();
-      },
-    }),
-    node("button", {
-      class: "btn-folder btn-danger",
-      type: "button",
-      id: "btn-folder-del",
-      text: "删除",
-      title: canManage ? "删掉这个文件夹，里面的信一起删" : "先选一个服务器上的文件夹（收件箱除外）",
-      disabled: canManage ? null : true,
-      onclick: deleteSelectedFolder,
-    }),
-    status,
-  );
+  // 光标处弹出。坐标走 CSSOM（CSP `style-src 'self'` 不管 `el.style.x`），clamp 进视口。
+  menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
+  menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 150))}px`;
+  document.body.append(menu);
+  openFolderCtx = menu;
 }
 
-function cancelFolderOp() {
-  state.folderOp = null;
-  renderFolderTools();
-}
-
-/** 文件夹列表重读一遍（增删改之后）。草稿哨兵照旧由 `withDraftsFolder` 补。 */
-async function reloadFolders() {
-  state.folders = withDraftsFolder(
-    await invoke("list_folders", { account_id: state.account.id }),
-  );
-}
-
-function folderOpError(err) {
-  // 失败就留在表单上：名字还在输入框里，改一下就能重试
-  const st = document.getElementById("folder-status");
-  if (st) st.textContent = err instanceof Error ? err.message : String(err);
-}
-
-async function submitFolderOp() {
-  const op = state.folderOp;
-  const input = document.getElementById("folder-name");
-  const name = (input?.value ?? "").trim();
-  if (!op) return;
-  if (!name) {
-    folderOpError(new Error("文件夹名不能空着"));
-    return;
-  }
-  try {
-    if (op.mode === "create") {
-      const folder = await invoke("create_folder", { account_id: state.account.id, name });
-      state.folderOp = null;
-      await reloadFolders();
-      await selectFolder(folder.id);
-    } else {
-      await invoke("rename_folder", { folder_id: op.folderId, new_name: name });
-      state.folderOp = null;
-      await reloadFolders();
-      await selectFolder(op.folderId);
-    }
-  } catch (err) {
-    folderOpError(err);
-  }
-}
-
-/**
- * 删掉选中的文件夹，**箱里的信一起删**。和删账号一样要点两次：
- * 第一次按钮变成「再点一次确认删除」，五秒内第二下才动手。
- *
- * 两步的理由见 [`deleteActiveAccount`]；这里多一层：删文件夹连带删信，
- * 而那些信只在本地库有一份缓存（服务器上已经没了），误触比删账号还难挽回。
- */
-async function deleteSelectedFolder() {
-  const folder = state.folders.find((f) => f.id === state.folderId);
-  if (!folder || folder.id === 0 || folder.kind === "inbox") return;
-  const btn = document.getElementById("btn-folder-del");
-
+/** 删除的两步确认：第一下待命，五秒内第二下才真删。 */
+function folderCtxDelete(folder) {
+  const btn = openFolderCtx?.querySelector("#folder-ctx-del");
   if (!folderDelArmed) {
     folderDelArmed = true;
     if (btn) btn.textContent = "再点一次确认删除";
     clearTimeout(folderDelTimer);
     folderDelTimer = setTimeout(() => {
       folderDelArmed = false;
-      const b = document.getElementById("btn-folder-del");
+      const b = openFolderCtx?.querySelector("#folder-ctx-del");
       if (b) b.textContent = "删除";
     }, 5000);
     return;
   }
-
   clearTimeout(folderDelTimer);
   folderDelArmed = false;
-  try {
-    await invoke("delete_folder", { folder_id: folder.id });
-    await reloadFolders();
-    // 删完不能再停在原来的文件夹上 —— 它没了。回收件箱（没有就第一个）。
+  closeFolderCtx();
+  invoke("delete_folder", { folder_id: folder.id })
+    .then(() => afterFolderChange(null))
+    .catch((err) => statusNote(`删除失败：${err instanceof Error ? err.message : err}`));
+}
+
+/** 增删改之后：重读文件夹、刷侧栏，选中停到 `selectId`（null=收件箱/第一个）。 */
+async function afterFolderChange(selectId) {
+  await refreshSidebarData();
+  if (state.account) {
+    state.folders = withDraftsFolder(
+      state.allFolders.filter((f) => f.account_id === state.account.id && f.id !== 0),
+    );
+  }
+  renderSidebar();
+  if (selectId != null) {
+    await selectFolder(selectId);
+  } else if (state.account) {
     const inbox = state.folders.find((f) => f.kind === "inbox") ?? state.folders[0];
     if (inbox) await selectFolder(inbox.id);
-  } catch (err) {
-    renderFolderTools();
-    folderOpError(err);
   }
+}
+
+/** 文件夹列表重读一遍。草稿哨兵照旧由 `withDraftsFolder` 补。 */
+async function reloadFolders() {
+  state.folders = withDraftsFolder(
+    await invoke("list_folders", { account_id: state.account.id }),
+  );
+}
+
+/** 新建/重命名的小对话框：Enter 确定、Esc/点外面 关闭。 */
+function openFolderNameDialog(title, initial, onSubmit) {
+  const input = node("input", {
+    class: "form-input", type: "text", value: initial ?? "",
+    placeholder: "文件夹名", "aria-label": "文件夹名",
+  });
+  const status = node("p", { class: "muted", text: "" });
+  const close = () => root.remove();
+  const submit = async () => {
+    const name = input.value.trim();
+    if (!name) {
+      status.textContent = "文件夹名不能空着";
+      return;
+    }
+    try {
+      await onSubmit(name);
+      close();
+    } catch (err) {
+      status.textContent = String(err instanceof Error ? err.message : err);
+    }
+  };
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      submit();
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      close();
+    }
+  });
+  const root = node(
+    "div", { class: "scrim", role: "dialog", "aria-label": title },
+    node("form", {
+      class: "dialog",
+      onsubmit: (ev) => { ev.preventDefault(); submit(); },
+    },
+      node("header", { class: "dialog-head" }, node("h2", { class: "dialog-title", text: title })),
+      node("div", { class: "dialog-body" }, input, status),
+      node("footer", { class: "dialog-foot" },
+        node("button", { class: "btn", type: "button", text: "取消", onclick: close }),
+        node("button", { class: "btn btn-primary", type: "submit", text: "确定" }),
+      ),
+    ),
+  );
+  root.addEventListener("mousedown", (ev) => { if (ev.target === root) close(); });
+  document.getElementById("app").append(root);
+  input.focus();
+  input.select();
 }
 
 // ---------------------------------------------------------------- 来信分类
