@@ -33,18 +33,32 @@ use crate::tokens;
 /// 同步有变化时发给前端的事件名。
 pub const EVENT_SYNC_CHANGED: &str = "sync://changed";
 
-/// 一轮 IDLE 的时长。
-///
-/// RFC 2177 要求至少 29 分钟内重新发一次 IDLE（服务器会掐长连接）。
-/// 20 分钟留足余量，又不至于让「手机上标了已读」过半小时才对上。
-const IDLE_INTERVAL: Duration = Duration::from_secs(20 * 60);
+/// IMAP 一轮 IDLE 的时长（重发间隔）。RFC 2177 要求 29 分钟内重新发一次
+/// （服务器会掐长连接）。**可配置**（设置→邮件读写→收信频率），钳在
+/// 5~25 分钟；IDLE 本身是推送、新信秒级到，这值只是保活节奏。
+fn idle_interval(store: &Store) -> Duration {
+    Duration::from_secs(sync_minutes(store).clamp(5, 25) * 60)
+}
+
+/// 收信频率（分钟）—— 设置 `sync_interval_min`，默认 3。
+/// 主要影响 POP3 轮询（协议无推送）；IMAP 只取其保活节奏。
+fn sync_minutes(store: &Store) -> u64 {
+    store
+        .get_setting("sync_interval_min")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(3)
+        .clamp(1, 30)
+}
 
 /// 还没授权码时的轮询间隔。填好密码后最迟这么久就能用上。
 const WAIT_FOR_SECRET: Duration = Duration::from_secs(30);
 
-/// POP3 轮询间隔。POP3 没有 IDLE（RFC 1939 没有推送），只能定时问。
-/// 3 分钟：比 wyemail 常见的 5 分钟勤一点，又不至于把服务器问烦。
-const POP3_POLL: Duration = Duration::from_secs(3 * 60);
+/// POP3 轮询间隔 = 收信频率设置（协议无推送，只能定时问；默认 3 分钟）。
+fn pop3_poll(store: &Store) -> Duration {
+    Duration::from_secs(sync_minutes(store) * 60)
+}
 
 /// 连不上的退避：5 秒起，翻倍到 5 分钟封顶。
 const BACKOFF_MIN: Duration = Duration::from_secs(5);
@@ -139,7 +153,7 @@ fn run_pop3(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
             }
         }
         pop.quit().ok();
-        thread::sleep(POP3_POLL);
+        thread::sleep(pop3_poll(&store));
     }
 }
 
@@ -193,7 +207,7 @@ fn run_imap(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
         }
 
         loop {
-            match conn.idle_wait(IDLE_INTERVAL) {
+            match conn.idle_wait(idle_interval(&store)) {
                 Ok(true) => {
                     // 有变化：收新信 + 刷标志
                     if let Err(e) = sync_inbox(&app, &store, account.id, &mut conn) {

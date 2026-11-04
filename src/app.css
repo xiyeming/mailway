@@ -1073,6 +1073,7 @@ body {
 }
 
 .row {
+  position: relative; /* hover 快速已读按钮的定位上下文 */
   display: flex;
   gap: 0.65rem;
   width: 100%;
@@ -1486,6 +1487,38 @@ body {
 
 .more-item.is-off:hover {
   background: none;
+}
+
+/* 列表行 hover 快速已读/未读（不打开邮件就改，推服务器） */
+.row-quick {
+  position: absolute;
+  right: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.65rem;
+  height: 1.65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  background: var(--bg);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+}
+
+.row:hover .row-quick,
+.row-quick:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.row-quick:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
 }
 
 /* 列表头筛选图标（只看未读）。 */

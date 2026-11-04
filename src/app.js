@@ -1426,7 +1426,40 @@ function renderThreadRow(t) {
         node("span", { class: "date", text: fmtRowDate(m.date || m.received_at) }),
       ),
     ),
+    // 快速已读/未读：不打开邮件就改标志（会话整会话一起），并推回服务器。
+    node("span", {
+      class: `row-quick${unread ? "" : " is-seen"}`,
+      role: "button",
+      tabindex: "0",
+      title: unread ? "标为已读（同步到服务器）" : "标为未读（同步到服务器）",
+      "aria-label": unread ? "标为已读" : "标为未读",
+      text: unread ? "✓" : "○",
+      onclick: (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        // 有未读 → 全标已读；全已读 → 全标未读（会话整会话一起）
+        quickMarkRead(t, unread);
+      },
+    }),
   );
+}
+
+/** 快速已读/未读：不打开邮件就改标志。会话行整会话一起改；
+ *  每封都走 `set_message_flags`（后台线程推回 IMAP 服务器）。 */
+async function quickMarkRead(thread, seen) {
+  const targets = thread.messages.filter((x) => x.flags.seen !== seen);
+  if (targets.length === 0) return;
+  for (const x of targets) {
+    const flags = { ...x.flags, seen };
+    await invoke("set_message_flags", { message_id: x.id, flags });
+    x.flags = flags;
+    const row = state.messages.find((y) => y.id === x.id);
+    if (row) row.flags = flags;
+    if (state.detail && state.detail.summary.id === x.id) state.detail.summary.flags = flags;
+  }
+  repaintList();
+  updateListCount();
+  if (state.detail && targets.some((x) => x.id === state.detail.summary.id)) renderReader();
 }
 
 /** 列表头筛选图标：只看未读 / 看全部。就地切 class，不重画整个头部。 */
@@ -2738,6 +2771,12 @@ function renderSettingsSection(content, id) {
       node("h3", { class: "settings-sub", text: "邮件列表查看" }),
       settingRow("邮件按主题聚合", "同一主题的多封信折成一条", check("thread_aggregate", "on")),
       settingRow("显示发件人头像", "列表行显示发件人头像", check("show_avatars", "on")),
+      node("h3", { class: "settings-sub", text: "收信" }),
+      settingRow("收信频率", "IMAP 有推送、新信基本实时；此频率主要影响 POP3 轮询（默认 3 分钟）", settingSelect(
+        [["1", "每 1 分钟"], ["3", "每 3 分钟"], ["5", "每 5 分钟"], ["10", "每 10 分钟"], ["15", "每 15 分钟"], ["30", "每 30 分钟"]],
+        val("sync_interval_min", "3"),
+        (v) => set("sync_interval_min", v),
+      )),
       node("h3", { class: "settings-sub", text: "邮件正文" }),
       settingRow("总是显示远程图片", "不拦截邮件里的外链图片（发件人可追踪已读，谨慎）", check("show_remote_images", "off")),
       node("h3", { class: "settings-sub", text: "文件夹列表查看" }),
