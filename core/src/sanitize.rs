@@ -362,6 +362,133 @@ fn ascii_starts_with_ci(hay: &[u8], needle: &[u8]) -> bool {
             .all(|(a, b)| a.to_ascii_lowercase() == *b)
 }
 
+/// 给样式表加**作用域前缀**：所有选择器套进 `.mail-body` 下。
+///
+/// `<style>` 是注入主文档的，邮件里的 `body`/`*`/`a`/`h1` 等选择器会匹配到
+/// **应用界面的元素**（实测：整页颜色/字体被改、工具条按钮变空白）。
+/// 前缀化后邮件样式只在正文容器内生效。`body`/`html`/`:root` 映射为
+/// `.mail-body` 本体（它们描述的就是「邮件页面」）。
+///
+/// 这是对文本的**结构保持改写**（只在选择器位置加前缀，不动声明），
+/// 与 [`scrub_css`] 同属清洗步骤的一部分。
+fn scope_stylesheet(css: &str) -> String {
+    let mut out = String::with_capacity(css.len() + 64);
+    scope_block(css, &mut out, true);
+    out
+}
+
+/// 递归处理一层规则块。`top` = 顶层（选择器要前缀化）。
+fn scope_block(css: &str, out: &mut String, top: bool) {
+    let bytes = css.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // 跳过空白原样带走
+        let prelude_start = i;
+        // 读 prelude（到 `{` 或 `;` 或尾）——跳过字符串/括号里的内容
+        let mut depth = 0usize;
+        let mut in_str: Option<u8> = None;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if let Some(q) = in_str {
+                if c == b'\\' { i += 2; continue; }
+                if c == q { in_str = None; }
+            } else if c == b'\'' || c == b'"' {
+                in_str = Some(c);
+            } else if c == b'(' {
+                depth += 1;
+            } else if c == b')' {
+                depth = depth.saturating_sub(1);
+            } else if depth == 0 && (c == b'{' || c == b';') {
+                break;
+            }
+            i += 1;
+        }
+        if i >= bytes.len() {
+            // 尾部残留（不成规则）原样
+            out.push_str(&css[prelude_start..]);
+            return;
+        }
+        let prelude = &css[prelude_start..i];
+        if bytes[i] == b';' {
+            // @charset/@import 之类语句（@import 已被 scrub 中和）
+            out.push_str(prelude);
+            out.push(';');
+            i += 1;
+            continue;
+        }
+        // 到 `{`：找配对 `}`（递归计数 + 字符串）
+        let body_start = i + 1;
+        let mut j = body_start;
+        let mut depth = 1usize;
+        let mut in_str: Option<u8> = None;
+        while j < bytes.len() && depth > 0 {
+            let c = bytes[j];
+            if let Some(q) = in_str {
+                if c == b'\\' { j += 2; continue; }
+                if c == q { in_str = None; }
+            } else if c == b'\'' || c == b'"' {
+                in_str = Some(c);
+            } else if c == b'{' {
+                depth += 1;
+            } else if c == b'}' {
+                depth -= 1;
+            }
+            j += 1;
+        }
+        let body_end = j.saturating_sub(1).max(body_start); // 不含 `}`
+        let body = &css[body_start..body_end];
+        let prelude_trim = prelude.trim();
+        let lower = prelude_trim.to_ascii_lowercase();
+        if lower.starts_with("@media") || lower.starts_with("@supports") {
+            // 嵌套块：头原样，里面的规则继续前缀化
+            out.push_str(prelude);
+            out.push('{');
+            scope_block(body, out, true);
+            out.push('}');
+        } else if lower.starts_with("@") {
+            // @keyframes / @font-face / @page 等：整体原样（内部不是选择器）
+            out.push_str(prelude);
+            out.push('{');
+            out.push_str(body);
+            out.push('}');
+        } else if top {
+            // 普通规则：选择器列表逐个套 .mail-body
+            out.push_str(&scope_selectors(prelude));
+            out.push('{');
+            out.push_str(body);
+            out.push('}');
+        } else {
+            out.push_str(prelude);
+            out.push('{');
+            out.push_str(body);
+            out.push('}');
+        }
+        i = body_end + 1;
+    }
+}
+
+/// 选择器列表（逗号分隔）→ 每个套进 `.mail-body`。
+fn scope_selectors(list: &str) -> String {
+    list.split(',')
+        .map(|sel| {
+            let t = sel.trim();
+            if t.is_empty() {
+                return String::new();
+            }
+            let low = t.to_ascii_lowercase();
+            // body/html/:root 描述的就是「邮件页面」→ 映射到容器本体
+            if low == "body" || low == "html" || low == ":root" || low == "html body" {
+                return ".mail-body".to_string();
+            }
+            if let Some(rest) = t.strip_prefix("body ") {
+                return format!(".mail-body {rest}");
+            }
+            format!(".mail-body {t}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// 净化产物里 `<style>` 元素的文本过 [`scrub_css`]（删减式）。
 ///
 /// 这是模块「不做事后修补」的**唯一例外**：只对 `<style>…</style>` 段内的
@@ -379,7 +506,9 @@ fn scrub_style_elements(html: &str, allow_remote: bool, counter: &AtomicUsize) -
         out.push_str(&rest[..tag_end]);
         if let Some(close) = rest[tag_end..].find("</style>") {
             let body = &rest[tag_end..tag_end + close];
-            out.push_str(&scrub_css(body, allow_remote, counter));
+            // 先删减清洗，再**作用域化**：邮件 CSS 的 body/a/h1 等选择器会匹配到
+            // 应用界面（同一份 DOM），实测把工具条/标题颜色全改了。
+            out.push_str(&scope_stylesheet(&scrub_css(body, allow_remote, counter)));
             out.push_str("</style>");
             rest = &rest[tag_end + close + "</style>".len()..];
         } else {
@@ -743,6 +872,34 @@ mod tests {
         let raw = r#"<div style="background:url(data:image/gif;base64,R0lGOD)">x</div>"#;
         let out = sanitize_html(raw, false);
         assert!(out.html.contains("data:image/gif"), "data: 不发网络，保留: {}", out.html);
+    }
+
+    #[test]
+    fn style_block_selectors_are_scoped_to_mail_body() {
+        // 邮件样式绝不能泄漏到应用界面（实测会把工具条/标题颜色全改掉）
+        let raw = r#"<style>*{box-sizing:border-box}body{margin:0;color:red}a{color:#fff}h1{color:#eee}</style><p>x</p>"#;
+        let out = sanitize_html(raw, false);
+        assert!(out.html.contains(".mail-body *{"), "选择器要作用域化: {}", out.html);
+        assert!(out.html.contains(".mail-body{"), "body 要映射到容器: {}", out.html);
+        assert!(out.html.contains(".mail-body a{"), "a 要作用域化: {}", out.html);
+        assert!(!out.html.contains("}a{") && !out.html.contains(">a{"), "裸 a 选择器会泄漏: {}", out.html);
+    }
+
+    #[test]
+    fn scoped_media_query_rules() {
+        let raw = r#"<style>@media (max-width:600px){ body{margin:0} .x{color:green} }</style><p>x</p>"#;
+        let out = sanitize_html(raw, false);
+        assert!(out.html.contains("@media (max-width:600px)"), "@media 头要留: {}", out.html);
+        assert!(out.html.contains(".mail-body{"), "嵌套 body 也要映射: {}", out.html);
+        assert!(out.html.contains(".mail-body .x{"), "嵌套选择器要作用域化: {}", out.html);
+    }
+
+    #[test]
+    fn keyframes_left_alone() {
+        let raw = r#"<style>@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }</style><p>x</p>"#;
+        let out = sanitize_html(raw, false);
+        assert!(out.html.contains("@keyframes spin"), "@keyframes 不动: {}", out.html);
+        assert!(!out.html.contains(".mail-body from"), "keyframe 选择器不能被前缀: {}", out.html);
     }
 
     #[test]

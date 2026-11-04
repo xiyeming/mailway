@@ -3195,6 +3195,12 @@ button:focus-visible,
   color: var(--accent);
 }
 
+/* 高级设置高亮：强调色 + 加粗，可点性一眼可见 */
+.acc-dialog .adv-toggle {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .acc-dialog .adv-arrow {
   font-size: 11px;
 }
