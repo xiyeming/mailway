@@ -15,6 +15,7 @@ mod demo;
 mod google_oauth;
 mod secrets;
 mod tokens;
+mod pool;
 mod worker;
 
 use std::sync::Arc;

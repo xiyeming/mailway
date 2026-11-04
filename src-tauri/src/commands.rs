@@ -29,12 +29,16 @@ use mailway_core::types::{
 
 use crate::secrets;
 use crate::tokens;
+use crate::pool::ConnPool;
 
 pub struct AppState {
     /// `Arc` 是给后台同步线程用的：它要能独立于任何一次 IPC 调用访问数据库。
     /// [`Store`] 自己内部是 `Mutex<Connection>`，方法都只借 `&self`，所以共享
     /// 一份就够，不需要把状态搬来搬去。
     pub store: Arc<Store>,
+    /// IMAP 连接复用池（见 [`crate::pool`]）：同账号的连续操作共用一条
+    /// 已登录连接，慢网下省掉每趟 TLS+LOGIN 的 2~5 秒。
+    pub pool: Arc<ConnPool<Conn>>,
     /// 用户点了「显示图片」的那些邮件。
     ///
     /// 策略是**逐封豁免**，不是全局开关——和原版一致，也更安全：默认拦，
@@ -47,8 +51,23 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(store: Arc<Store>) -> Self {
+        // 建连闭包就是原来 `connect()` 那套：查账号 → 取凭据（xoauth2 会顺带
+        // 刷 token）→ 连上登录。探活用 NOOP（一个极小的来回）。
+        let store_for_pool = Arc::clone(&store);
+        let pool = Arc::new(ConnPool::new(
+            move |account_id| {
+                let account = store_for_pool
+                    .get_account(account_id)?
+                    .ok_or_else(|| Error::Config("账号已不存在".into()))?;
+                let password = crate::tokens::effective_secret(&store_for_pool, &account)?
+                    .ok_or_else(|| Error::Secret("没有授权码".into()))?;
+                Conn::for_account(&account, &password)
+            },
+            |conn| conn.noop().is_ok(),
+        ));
         AppState {
             store,
+            pool,
             allowed_remote: Mutex::new(HashSet::new()),
         }
     }
@@ -94,12 +113,12 @@ pub fn create_folder(
     if name.is_empty() {
         return Err("文件夹名不能空着".into());
     }
-    let (_account, mut conn) = connect(&state, account_id)?;
-    let out = SyncEngine::new(&state.store)
-        .create_folder(&mut conn, account_id, name)
-        .map_err(e);
-    conn.logout().ok();
-    out
+    state
+        .pool
+        .with(account_id, |conn| {
+            SyncEngine::new(&state.store).create_folder(conn, account_id, name)
+        })
+        .map_err(e)
 }
 
 /// 改文件夹名。收件箱不给改 —— 协议里改 INBOX 是「搬空自己」的特殊语义，
@@ -122,12 +141,12 @@ pub fn rename_folder(
     if folder.kind == FolderKind::Inbox {
         return Err("收件箱不能改名".into());
     }
-    let (_account, mut conn) = connect(&state, folder.account_id)?;
-    let out = SyncEngine::new(&state.store)
-        .rename_folder(&mut conn, &folder, new_name)
-        .map_err(e);
-    conn.logout().ok();
-    out?;
+    state
+        .pool
+        .with(folder.account_id, |conn| {
+            SyncEngine::new(&state.store).rename_folder(conn, &folder, new_name)
+        })
+        .map_err(e)?;
     state
         .store
         .get_folder(folder_id)
@@ -147,12 +166,12 @@ pub fn delete_folder(state: State<'_, AppState>, folder_id: i64) -> Result<(), S
     if folder.kind == FolderKind::Inbox {
         return Err("收件箱不能删".into());
     }
-    let (_account, mut conn) = connect(&state, folder.account_id)?;
-    let out = SyncEngine::new(&state.store)
-        .delete_folder(&mut conn, &folder)
-        .map_err(e);
-    conn.logout().ok();
-    out
+    state
+        .pool
+        .with(folder.account_id, |conn| {
+            SyncEngine::new(&state.store).delete_folder(conn, &folder)
+        })
+        .map_err(e)
 }
 
 // ================================================================= 同步
@@ -228,12 +247,13 @@ pub fn sync_account(state: State<'_, AppState>, account_id: i64) -> Result<SyncR
         pop.quit().ok();
         return Ok(SyncReport::from_outs(vec![out.map_err(e)?]));
     }
-    let (account, mut conn) = connect(&state, account_id)?;
-    let outs = SyncEngine::new(&state.store)
-        .sync_account(&mut conn, account.id)
-        .map_err(e);
-    conn.logout().ok();
-    Ok(SyncReport::from_outs(outs?))
+    let outs = state
+        .pool
+        .with(account.id, |conn| {
+            SyncEngine::new(&state.store).sync_account(conn, account.id)
+        })
+        .map_err(e)?;
+    Ok(SyncReport::from_outs(outs))
 }
 
 /// 只同步一个文件夹。
@@ -259,12 +279,13 @@ pub fn sync_folder(state: State<'_, AppState>, folder_id: i64) -> Result<FolderS
         pop.quit().ok();
         return Ok(out.map_err(e)?.into());
     }
-    let (_account, mut conn) = connect(&state, folder.account_id)?;
-    let out = SyncEngine::new(&state.store)
-        .sync_folder(&mut conn, folder.account_id, &folder)
-        .map_err(e);
-    conn.logout().ok();
-    Ok(out?.into())
+    let out = state
+        .pool
+        .with(folder.account_id, |conn| {
+            SyncEngine::new(&state.store).sync_folder(conn, folder.account_id, &folder)
+        })
+        .map_err(e)?;
+    Ok(out.into())
 }
 
 /// 只拉回这个文件夹的标志（已读 / 星标），**不取正文**。
@@ -277,12 +298,13 @@ pub fn refresh_folder_flags(state: State<'_, AppState>, folder_id: i64) -> Resul
         .get_folder(folder_id)
         .map_err(e)?
         .ok_or_else(|| not_found("这个文件夹"))?;
-    let (_account, mut conn) = connect(&state, folder.account_id)?;
-    let n = SyncEngine::new(&state.store)
-        .refresh_flags(&mut conn, &folder)
-        .map_err(e);
-    conn.logout().ok();
-    Ok(n?)
+    let n = state
+        .pool
+        .with(folder.account_id, |conn| {
+            SyncEngine::new(&state.store).refresh_flags(conn, &folder)
+        })
+        .map_err(e)?;
+    Ok(n)
 }
 
 /// 存（或换）一个账号的授权码。值进系统钥匙串，库里只留一个指路的 key。
@@ -315,29 +337,12 @@ pub fn delete_account(state: State<'_, AppState>, account_id: i64) -> Result<(),
     if let Err(err) = secrets::delete(&state.store, &account) {
         tracing::warn!(account_id, "钥匙串里的授权码没删干净: {}", err.user_message());
     }
+    // 连接池里的闲置连接也丢掉 —— 账号都没了，留着一条已登录的连接没意义
+    state.pool.invalidate(account_id);
     state.store.delete_account(account_id).map_err(e)
 }
 
 // ---------------------------------------------------------------- 同步的内部
-
-/// 连上一个账号，返回 `(账号, 连接)`。
-///
-/// **授权码只在这一层过手，用完即弃** —— [`Conn`] 里没有密码字段，
-/// [`AppState`] 里也不存，日志里更不会有（见 [`crate::secrets`]）。
-/// 没存过授权码就返回一句人话，不是 `ImapAuth`：那会误导用户去查密码，
-/// 其实是压根没填。
-fn connect(state: &State<'_, AppState>, account_id: i64) -> Result<(Account, Conn), String> {
-    let account = state
-        .store
-        .get_account(account_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这个账号"))?;
-    let password = tokens::effective_secret(&state.store, &account)
-        .map_err(e)?
-        .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
-    let conn = Conn::for_account(&account, &password).map_err(e)?;
-    Ok((account, conn))
-}
 
 /// 把标志推回服务器，放在后台线程里做。
 fn push_flags_in_background(
@@ -349,10 +354,11 @@ fn push_flags_in_background(
     new: Flags,
 ) {
     let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
     let spawned = std::thread::Builder::new()
         .name(format!("mailway-push-{message_id}"))
         .spawn(move || {
-            if let Err(err) = push_flags(&store, folder_id, uid, &old, &new) {
+            if let Err(err) = push_flags(&store, &pool, folder_id, uid, &old, &new) {
                 // `user_message()` 是固定的一句话，不会把密码或主机细节带出来
                 tracing::warn!(message_id, folder_id, uid, "推标志失败: {}", err.user_message());
             }
@@ -364,6 +370,7 @@ fn push_flags_in_background(
 
 fn push_flags(
     store: &Store,
+    pool: &ConnPool<Conn>,
     folder_id: i64,
     uid: u32,
     old: &Flags,
@@ -378,13 +385,9 @@ fn push_flags(
     if account.protocol == Protocol::Pop3 {
         return Ok(()); // POP3 没有服务器标志，已读/标星是纯本地概念
     }
-    let password = tokens::effective_secret(store, &account)?
-        .ok_or_else(|| Error::Secret("没有授权码".into()))?;
-
-    let mut conn = Conn::for_account(&account, &password)?;
-    let res = SyncEngine::new(store).push_flags(&mut conn, &folder, uid, old, new);
-    conn.logout().ok();
-    res
+    pool.with(account.id, |conn| {
+        SyncEngine::new(store).push_flags(conn, &folder, uid, old, new)
+    })
 }
 
 // ================================================================= 列表页
@@ -798,10 +801,11 @@ pub fn mark_folder_read(state: State<'_, AppState>, folder_id: i64) -> Result<u3
 
 fn push_seen_in_background(state: &State<'_, AppState>, folder_id: i64, uids: Vec<u32>) {
     let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
     let spawned = std::thread::Builder::new()
         .name(format!("mailway-seen-{folder_id}"))
         .spawn(move || {
-            if let Err(err) = push_seen(&store, folder_id, &uids) {
+            if let Err(err) = push_seen(&store, &pool, folder_id, &uids) {
                 tracing::warn!(folder_id, "整箱标已读推服务器失败: {}", err.user_message());
             }
         });
@@ -811,7 +815,7 @@ fn push_seen_in_background(state: &State<'_, AppState>, folder_id: i64, uids: Ve
 }
 
 /// 一批信一条 `UID STORE … \Seen` 推完 —— 不按封推，一个来回的事。
-fn push_seen(store: &Store, folder_id: i64, uids: &[u32]) -> CoreResult<()> {
+fn push_seen(store: &Store, pool: &ConnPool<Conn>, folder_id: i64, uids: &[u32]) -> CoreResult<()> {
     let folder = store
         .get_folder(folder_id)?
         .ok_or_else(|| Error::Config("文件夹已不存在".into()))?;
@@ -821,12 +825,9 @@ fn push_seen(store: &Store, folder_id: i64, uids: &[u32]) -> CoreResult<()> {
     if account.protocol == Protocol::Pop3 {
         return Ok(()); // 同 push_flags：POP3 标志纯本地
     }
-    let password = tokens::effective_secret(store, &account)?
-        .ok_or_else(|| Error::Secret("没有授权码".into()))?;
-    let mut conn = Conn::for_account(&account, &password)?;
-    let res = SyncEngine::new(store).push_seen(&mut conn, &folder, uids);
-    conn.logout().ok();
-    res
+    pool.with(account.id, |conn| {
+        SyncEngine::new(store).push_seen(conn, &folder, uids)
+    })
 }
 
 /// 删除一封信。
@@ -880,18 +881,19 @@ pub fn delete_message(
     };
 
     let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
     let spawned = match trash_id {
         Some(trash_id) => std::thread::Builder::new()
             .name(format!("mailway-move-{message_id}"))
             .spawn(move || {
-                if let Err(err) = move_message_remote(&store, folder_id, trash_id, uid) {
+                if let Err(err) = move_message_remote(&store, &pool, folder_id, trash_id, uid) {
                     tracing::warn!(message_id, folder_id, uid, "挪废纸篓失败: {}", err.user_message());
                 }
             }),
         None => std::thread::Builder::new()
             .name(format!("mailway-del-{message_id}"))
             .spawn(move || {
-                if let Err(err) = delete_message_remote(&store, folder_id, uid) {
+                if let Err(err) = delete_message_remote(&store, &pool, folder_id, uid) {
                     tracing::warn!(message_id, folder_id, uid, "彻底删除推服务器失败: {}", err.user_message());
                 }
             }),
@@ -934,10 +936,11 @@ pub fn move_message(
     }
 
     let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
     std::thread::Builder::new()
         .name(format!("mailway-move-{message_id}"))
         .spawn(move || {
-            if let Err(err) = move_message_remote(&store, from_id, to_folder_id, uid) {
+            if let Err(err) = move_message_remote(&store, &pool, from_id, to_folder_id, uid) {
                 tracing::warn!(message_id, from_id, to_folder_id, uid, "挪箱失败: {}", err.user_message());
             }
         })
@@ -946,7 +949,13 @@ pub fn move_message(
     state.store.delete_message(message_id).map_err(e)
 }
 
-fn move_message_remote(store: &Store, from_id: i64, to_id: i64, uid: u32) -> CoreResult<()> {
+fn move_message_remote(
+    store: &Store,
+    pool: &ConnPool<Conn>,
+    from_id: i64,
+    to_id: i64,
+    uid: u32,
+) -> CoreResult<()> {
     let from = store
         .get_folder(from_id)?
         .ok_or_else(|| Error::Config("源文件夹已不存在".into()))?;
@@ -956,35 +965,29 @@ fn move_message_remote(store: &Store, from_id: i64, to_id: i64, uid: u32) -> Cor
     let account = store
         .get_account(from.account_id)?
         .ok_or_else(|| Error::Config("账号已不存在".into()))?;
-    let password = tokens::effective_secret(store, &account)?
-        .ok_or_else(|| Error::Secret("没有授权码".into()))?;
-    let mut conn = Conn::for_account(&account, &password)?;
-    let engine = SyncEngine::new(store);
-    let res = engine.move_message(&mut conn, &from, uid, &to);
-    if res.is_ok() {
+    // 挪箱 + 追平目标箱共用一条连接（挪完还要 SELECT 目标箱收一轮）
+    pool.with(account.id, |conn| {
+        let engine = SyncEngine::new(store);
+        engine.move_message(conn, &from, uid, &to)?;
         // 挪完立刻把废纸篓追平 —— 用户点完删除切过去就该看得见，而不是
         // 等下一轮收信。失败不掩盖挪箱的结果，只是废纸篓晚点才出现。
-        if let Err(err) = engine.sync_folder(&mut conn, account.id, &to) {
+        if let Err(err) = engine.sync_folder(conn, account.id, &to) {
             tracing::warn!(folder_id = to.id, "挪箱后追平目标箱失败: {}", err.user_message());
         }
-    }
-    conn.logout().ok();
-    res
+        Ok(())
+    })
 }
 
-fn delete_message_remote(store: &Store, folder_id: i64, uid: u32) -> CoreResult<()> {
+fn delete_message_remote(store: &Store, pool: &ConnPool<Conn>, folder_id: i64, uid: u32) -> CoreResult<()> {
     let folder = store
         .get_folder(folder_id)?
         .ok_or_else(|| Error::Config("文件夹已不存在".into()))?;
     let account = store
         .get_account(folder.account_id)?
         .ok_or_else(|| Error::Config("账号已不存在".into()))?;
-    let password = tokens::effective_secret(store, &account)?
-        .ok_or_else(|| Error::Secret("没有授权码".into()))?;
-    let mut conn = Conn::for_account(&account, &password)?;
-    let res = SyncEngine::new(store).delete_message(&mut conn, &folder, uid);
-    conn.logout().ok();
-    res
+    pool.with(account.id, |conn| {
+        SyncEngine::new(store).delete_message(conn, &folder, uid)
+    })
 }
 
 // ================================================================= 阅读页

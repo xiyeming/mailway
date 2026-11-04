@@ -34,6 +34,11 @@ use crate::types::{Flags, Security};
 
 // ================================================================= 配置
 
+/// 单条命令的 I/O 超时。和 SMTP 同款：没有超时的 socket 在 NAT/代理黑洞下
+/// 会永远挂住；连接复用后探活僵尸连接必须有界。IDLE 的长等不受影响 ——
+/// imap crate 的 `wait_with_timeout` 在等待期间会自设读超时。
+const IO_TIMEOUT: Duration = Duration::from_secs(60);
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub host: String,
@@ -145,28 +150,44 @@ impl Conn {
     /// 密码（或授权码）由调用方从 keyring 取，**不进这个结构**，也不会落到
     /// 任何日志里。失败一律归到 [`Error::ImapAuth`]：登录是唯一会因为凭据
     /// 出错的地方，`user_message()` 给的提示也对得上。
-    pub fn connect(cfg: &Config, password: &str, is_oauth: bool) -> Result<Self> {        let session = match cfg.security {
+    ///
+    /// 流由我们**自己建**：统一设读/写超时（[`IO_TIMEOUT`]）——见该常量。
+    pub fn connect(cfg: &Config, password: &str, is_oauth: bool) -> Result<Self> {
+        let tcp = TcpStream::connect((cfg.host.as_str(), cfg.port))
+            .map_err(|e| Error::ImapConnect(e.to_string()))?;
+        tcp.set_read_timeout(Some(IO_TIMEOUT)).ok();
+        tcp.set_write_timeout(Some(IO_TIMEOUT)).ok();
+
+        let session = match cfg.security {
             Security::Plain => {
                 // imap crate 没有 connect_insecure，明文要自己连 TcpStream
-                let tcp = TcpStream::connect((cfg.host.as_str(), cfg.port))
+                let mut client = ::imap::Client::new(tcp);
+                client
+                    .read_greeting()
                     .map_err(|e| Error::ImapConnect(e.to_string()))?;
-                AnySession::Plain(login(::imap::Client::new(tcp), cfg, password, is_oauth)?)
+                AnySession::Plain(login(client, cfg, password, is_oauth)?)
             }
             Security::Ssl => {
                 let tls = tls_connector()?;
-                let client =
-                    ::imap::connect((cfg.host.as_str(), cfg.port), cfg.host.as_str(), &tls)
-                        .map_err(|e| Error::ImapConnect(e.to_string()))?;
+                let stream = tls
+                    .connect(&cfg.host, tcp)
+                    .map_err(|e| Error::ImapConnect(format!("TLS 握手失败: {e}")))?;
+                let mut client = ::imap::Client::new(stream);
+                client
+                    .read_greeting()
+                    .map_err(|e| Error::ImapConnect(e.to_string()))?;
                 AnySession::Tls(login(client, cfg, password, is_oauth)?)
             }
             Security::StartTls => {
                 let tls = tls_connector()?;
-                let client = ::imap::connect_starttls(
-                    (cfg.host.as_str(), cfg.port),
-                    cfg.host.as_str(),
-                    &tls,
-                )
-                .map_err(|e| Error::ImapConnect(e.to_string()))?;
+                let mut client = ::imap::Client::new(tcp);
+                client
+                    .read_greeting()
+                    .map_err(|e| Error::ImapConnect(e.to_string()))?;
+                // `secure` 内部发 STARTTLS 再升级（同 imap::connect_starttls）
+                let client = client
+                    .secure(cfg.host.as_str(), &tls)
+                    .map_err(|e| Error::ImapConnect(e.to_string()))?;
                 AnySession::Tls(login(client, cfg, password, is_oauth)?)
             }
         };
