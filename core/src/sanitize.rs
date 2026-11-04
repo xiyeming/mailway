@@ -128,7 +128,23 @@ pub fn sanitize_body(raw: &str, allow_remote: bool, cid: &CidMap<'_>) -> Sanitiz
     b.clean_content_tags(DROP_CONTENT_TAGS.iter().copied().collect::<std::collections::HashSet<_>>());
 
     // `<style>` 放行（邮件排版靠它）。默认白名单不含，得显式加。
-    b.add_tags(&["style"]);
+    b.add_tags(&["style", "center", "font"]);
+
+    // HTML 邮件的排版属性（老式 table 布局全靠它们）。无脚本面：
+    // 数值/枚举/颜色属性，浏览器只当排版用。
+    b.add_tag_attributes("table", ["width", "height", "cellpadding", "cellspacing", "border", "bgcolor", "align"]);
+    b.add_tag_attributes("td", ["valign", "bgcolor", "width", "height", "nowrap", "align"]);
+    b.add_tag_attributes("th", ["valign", "bgcolor", "width", "height", "nowrap", "align"]);
+    b.add_tag_attributes("tr", ["valign", "bgcolor", "align"]);
+    b.add_tag_attributes("img", ["border", "hspace", "vspace", "align"]);
+    b.add_tag_attributes("font", ["color", "face", "size"]);
+    b.add_tag_attributes("p", ["align"]);
+    b.add_tag_attributes("div", ["align"]);
+    b.add_tag_attributes("span", ["align"]);
+    for h in ["h1", "h2", "h3", "h4", "h5", "h6"] {
+        b.add_tag_attributes(h, ["align"]);
+    }
+    b.add_tag_attributes("center", ["width"]);
 
     // style 属性**放行但清洗**：HTML 邮件的排版全在内联 CSS 里。清洗是
     // 删减式（scrub_css）：@import / expression( / position:fixed / 外呼 url()
@@ -137,7 +153,7 @@ pub fn sanitize_body(raw: &str, allow_remote: bool, cid: &CidMap<'_>) -> Sanitiz
 
     // ammonia 4 里 style 不在默认 generic_attributes（只有 lang/title）——
     // 显式放行，值的清洗交给下面的 attribute_filter。
-    b.generic_attributes(["lang", "title", "style"].into_iter().collect());
+    b.generic_attributes(["lang", "title", "style", "class"].into_iter().collect());
 
     // 相对 URL 一律拒绝。邮件 HTML 里的相对链接没有合理语义（相对于什么？
     // 我们没有 base），放行只会变成盲猜。

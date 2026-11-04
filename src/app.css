@@ -1887,10 +1887,13 @@ button.thread-item:hover {
   border-collapse: collapse;
 }
 
+/* HTML 邮件的 table/td 是**排版表格**（外观由邮件内联样式管），这里
+   不加边框不加 padding —— 加了就是满屏框（实测）。数据表格要框，
+   邮件自己会写 border。 */
 .mail-body td,
 .mail-body th {
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--line);
+  padding: 0;
+  border: none;
 }
 
 /* 纯文本正文：保留原换行，但不撑破栏宽 */
