@@ -1679,19 +1679,49 @@ function renderMsgHead(d) {
         text: "详情",
         onclick: (e) => {
           e.stopPropagation();
-          const raw = card.parentElement?.querySelector(".msg-raw");
-          if (raw) raw.hidden = !raw.hidden;
+          const box = card.parentElement?.querySelector(".msg-details");
+          if (!box) return;
+          box.hidden = !box.hidden;
+          e.currentTarget.textContent = box.hidden ? "详情" : "收起";
         },
       }),
     ),
   );
 
-  // 原始头（「详情」展开），不进净化器，只作排错参考
+  // 「详情」展开：格式化字段（对齐网易邮箱大师），不甩原始代码。
+  const hdr = (name) => (d.raw_headers.find(([k]) => k.toLowerCase() === name) || [])[1] || "";
+  const fmtFull = (m) => (m?.display ? `${m.display} <${m.address}>` : m?.address || "");
+  const drow = (label, value, mono) =>
+    value
+      ? node("div", { class: "msg-drow" },
+          node("span", { class: "msg-dlabel", text: label }),
+          node("span", { class: mono ? "msg-dvalue is-mono" : "msg-dvalue", text: value }),
+        )
+      : null;
+  const details = node("div", { class: "msg-details", hidden: true },
+    drow("发件人", fmtFull(s.from[0])),
+    drow("收件人", fmtAddr(s.to)),
+    d.cc.length ? drow("抄送", fmtAddr(d.cc)) : null,
+    d.reply_to.length ? drow("回复至", fmtAddr(d.reply_to)) : null,
+    drow("主题", s.subject),
+    drow("时间", fmtFullDate(s.date)),
+    drow("Message-ID", hdr("message-id"), true),
+  );
+
+  // 原始信头收进小折叠（排错参考，不默认展示）
   const raw = node("pre", {
     class: "msg-raw",
     hidden: true,
     text: d.raw_headers.map(([k, v]) => `${k}: ${v}`).join("\n"),
   });
+  const rawBtn = node("button", {
+    class: "msg-raw-btn", type: "button", text: "原始信头 ▾",
+    onclick: () => {
+      raw.hidden = !raw.hidden;
+      rawBtn.textContent = raw.hidden ? "原始信头 ▾" : "原始信头 ▴";
+    },
+  });
+  details.append(rawBtn, raw);
 
   // 代发：Sender 头跟 From 地址不是一路 → 提示一行
   const norm = (a) => (a || "").toLowerCase().replace(/[<>]/g, "").trim();
@@ -1701,7 +1731,7 @@ function renderMsgHead(d) {
       ? node("div", { class: "msg-onbehalf", text: `（此邮件由 ${senderHdr} 代发）` })
       : null;
 
-  return node("div", { class: "msg-head" }, card, onBehalf, raw);
+  return node("div", { class: "msg-head" }, card, onBehalf, details);
 }
 
 async function showRemoteImages() {

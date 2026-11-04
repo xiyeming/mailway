@@ -3235,3 +3235,60 @@ button:focus-visible,
 .acc-dialog .adv-box > .btn {
   align-self: flex-start;
 }
+
+
+/* ==================== 信头「详情」面板（格式化字段） ================== */
+.msg-details {
+  margin-top: 0.55rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  display: flex;
+  flex-direction: column;
+  gap: 0.42rem;
+}
+
+.msg-details[hidden] {
+  display: none;
+}
+
+.msg-drow {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.65rem;
+  align-items: baseline;
+}
+
+.msg-dlabel {
+  color: var(--fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.msg-dvalue {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.msg-dvalue.is-mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.msg-raw-btn {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.msg-raw-btn:hover {
+  color: var(--accent);
+}
