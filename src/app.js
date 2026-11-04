@@ -743,21 +743,23 @@ function closeFolderCtx() {
   openFolderCtx = null;
 }
 
-document.addEventListener("click", () => closeFolderCtx());
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeFolderCtx();
 });
 
-/** 右键文件夹/账号行：光标处弹操作菜单。`folder=null` = 账号行（只有新建）。 */
+/** 右键文件夹/账号行：光标处弹操作菜单。`folder=null` = 账号行（只有新建）。
+ *  菜单挂在全屏透明 overlay（同 .scrim 图层配方）里 —— 单独的 fixed 菜单
+ *  在 WebKitGTK 里会被列表区的合成层压住，见 `.menu-overlay` 注释。 */
 function openFolderCtxMenu(e, account, folder) {
   e.preventDefault();
   e.stopPropagation();
   closeFolderCtx();
   const canManage = !!folder && folder.id !== 0 && folder.kind !== "inbox";
+  const overlay = node("div", { class: "menu-overlay", role: "presentation" });
+  overlay.addEventListener("mousedown", (ev) => {
+    if (ev.target === overlay) closeFolderCtx();
+  });
   const menu = node("div", { class: "more-menu is-fixed", role: "menu" });
-  // 菜单里的点击别冒泡到 document —— 外面那句「点任意处关菜单」会把
-  // 两步确认打断（第一下待命时菜单就被关了）。需要关的时候各动作自己关。
-  menu.addEventListener("click", (e) => e.stopPropagation());
   menu.append(
     node("button", {
       class: "more-item", type: "button", role: "menuitem", text: "新建文件夹",
@@ -794,13 +796,14 @@ function openFolderCtxMenu(e, account, folder) {
       }),
     );
   }
-  // 光标处弹出。坐标走 CSSOM（CSP `style-src 'self'` 不管 `el.style.x`），clamp 进视口。
+  // 光标处弹出（overlay 全屏 = 视口坐标系；clamp 进视口）。
   // `right: auto` 必须清掉：基础样式的 `right: 0` 和 left 同时生效会把菜单拉满屏宽。
   menu.style.right = "auto";
   menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
   menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 150))}px`;
-  document.body.append(menu);
-  openFolderCtx = menu;
+  overlay.append(menu);
+  document.body.append(overlay);
+  openFolderCtx = overlay;
 }
 
 /** 删除的两步确认：第一下待命，五秒内第二下才真删。 */

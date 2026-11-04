@@ -1405,6 +1405,19 @@ body {
   position: relative;
 }
 
+/* 右键菜单的全屏透明底座。和 `.scrim` 同一图层配方（fixed + z-index 2000 +
+   translateZ）—— 实测单独的 fixed 菜单（z-index 1000，甚至加 translateZ）
+   在 WebKitGTK 里仍会被列表区的合成层压住，而 scrim 式全屏层从来没被压过。
+   菜单挂在它里面，坐标直接用视口坐标（overlay 全屏，等价）。 */
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  transform: translateZ(0);
+  background: transparent;
+  cursor: default;
+}
+
 .more-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -1426,9 +1439,8 @@ body {
 
 /* 弹出时切 fixed：逃出 `.reader` 的 overflow 裁剪与层叠（WebKitGTK 下
    absolute 在滚动容器里会被正文压住）。坐标由 showMore 用 CSSOM 设。
-   `translateZ(0)` 把它提升为自己的合成层 —— WebKitGTK 里滚动容器的滚动条
-   画在合成层上，会盖过同层叠上下文里**未合成**的 fixed 元素（实测右键菜单
-   被侧栏滚动条压住），层叠 z-index 管不了这事，得比层。 */
+   `translateZ(0)` 把它提升为自己的合成层，避开滚动条合成层（右键菜单走
+   `.menu-overlay` 底座，更彻底）。 */
 .more-menu.is-fixed {
   position: fixed;
   left: auto;
