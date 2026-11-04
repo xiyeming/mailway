@@ -2486,6 +2486,46 @@ button:focus-visible,
   font-size: 12px;
 }
 
+/* 添加账号：供应商速选 + 收信协议切换 */
+.acc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.acc-chip {
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.acc-chip:hover {
+  border-color: var(--accent, #4f6bf6);
+}
+
+.proto-btn {
+  padding: 0.3rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.proto-btn.is-on {
+  border-color: var(--accent, #4f6bf6);
+  background: var(--accent, #4f6bf6);
+  color: #fff;
+}
+
 /* 左栏账号列表底下的按钮 + 一个账号都没有时中栏那块 */
 .account-chip .btn-account {
   margin-top: 0.35rem;

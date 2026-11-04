@@ -38,6 +38,9 @@ impl Security {
 #[serde(rename_all = "snake_case")]
 pub enum Protocol {
     Imap,
+    /// POP3（RFC 1939）。只收信：没有服务器端文件夹/标志，同步按 UIDL 增量，
+    /// 已读/标星等全部只存本地。
+    Pop3,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

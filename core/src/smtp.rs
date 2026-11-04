@@ -465,7 +465,7 @@ fn authenticate(
 }
 
 /// XOAUTH2 的 SASL 初始响应（base64）：`user=<u>\x01auth=Bearer <t>\x01\x01`。
-fn xoauth2_sasl(user: &str, token: &str) -> String {
+pub(crate) fn xoauth2_sasl(user: &str, token: &str) -> String {
     use base64::Engine;
     let raw = format!("user={user}\x01auth=Bearer {token}\x01\x01");
     base64::engine::general_purpose::STANDARD.encode(raw)

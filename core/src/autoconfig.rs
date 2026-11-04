@@ -18,9 +18,23 @@ pub struct ServerConfig {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_security: Security,
+    /// POP3 收信（可选协议用）。域名惯例是 `imap.` → `pop.`，不适用就同 IMAP 主机。
+    pub pop3_host: String,
+    pub pop3_port: u16,
+    pub pop3_security: Security,
 }
 
-/// 隐式 TLS 的常用端口（IMAP 993 / SMTP 465）。
+/// 按域名惯例推 POP3 主机：`imap.example.com` → `pop.example.com`。
+/// 没有 `imap.` 前缀的（如 outlook.office365.com）就用同一个主机，
+/// 它们多服务口都收 POP3。
+fn pop3_for(imap_host: &str) -> String {
+    match imap_host.strip_prefix("imap.") {
+        Some(rest) => format!("pop.{rest}"),
+        None => imap_host.to_string(),
+    }
+}
+
+/// 隐式 TLS 的常用端口（IMAP 993 / SMTP 465 / POP3 995）。
 fn ssl(imap_host: &str, smtp_host: &str) -> ServerConfig {
     ServerConfig {
         imap_host: imap_host.into(),
@@ -29,6 +43,9 @@ fn ssl(imap_host: &str, smtp_host: &str) -> ServerConfig {
         smtp_host: smtp_host.into(),
         smtp_port: 465,
         smtp_security: Security::Ssl,
+        pop3_host: pop3_for(imap_host),
+        pop3_port: 995,
+        pop3_security: Security::Ssl,
     }
 }
 
@@ -41,6 +58,9 @@ fn starttls(imap_host: &str, smtp_host: &str) -> ServerConfig {
         smtp_host: smtp_host.into(),
         smtp_port: 587,
         smtp_security: Security::StartTls,
+        pop3_host: pop3_for(imap_host),
+        pop3_port: 995,
+        pop3_security: Security::Ssl,
     }
 }
 
@@ -143,6 +163,9 @@ mod tests {
         assert_eq!(g.imap_port, 993);
         assert_eq!(g.smtp_host, "smtp.gmail.com");
         assert_eq!(g.smtp_port, 465);
+        // POP3 按 imap. → pop. 惯例推导
+        assert_eq!(g.pop3_host, "pop.gmail.com");
+        assert_eq!(g.pop3_port, 995);
 
         let q = lookup("a@qq.com").unwrap();
         assert_eq!(q.imap_host, "imap.qq.com");

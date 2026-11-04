@@ -20,6 +20,16 @@ pub enum Error {
     #[error("IMAP 认证失败: {0}")]
     ImapAuth(String),
 
+    // POP3 三条，和 IMAP 的一一对应（连不上 / 认证失败 / 协议错）。
+    #[error("POP3 错误: {0}")]
+    Pop3(String),
+
+    #[error("POP3 连接失败: {0}")]
+    Pop3Connect(String),
+
+    #[error("POP3 认证失败: {0}")]
+    Pop3Auth(String),
+
     // 发信三类，和收信的三条一一对应。「授权码不对」和「服务器连不上」
     // 对用户是两件事，提示也该不一样。
     #[error("SMTP 错误: {0}")]

@@ -224,6 +224,59 @@ impl<'s> SyncEngine<'s> {
     /// （我们刚删的、别人在别处删的），前者由 [`crate::store::Store::delete_folder`]
     /// 收尾，后者的发现是同步的事，不该藏在一个「刷清单」的函数里悄悄干掉
     /// 一箱子缓存信。`\NoSelect` 跳过的理由同 [`Self::sync_account`]。
+    /// 同步一个 POP3 账号：只收收件箱，按 **UIDL** 增量去重。
+    ///
+    /// POP3 没有服务器端文件夹和标志，所以没有「刷标志」那半边；来信分类
+    /// 挪箱是**本地**的（信直接落到目标箱），不碰服务器（也没有可碰的）。
+    /// 只拉不删：`RETR` 过的信保留在服务器上。
+    pub fn sync_pop3(
+        &self,
+        pop: &mut crate::pop3::Conn,
+        account_id: i64,
+    ) -> Result<FolderSync> {
+        let folder = self.store.ensure_inbox_folder(account_id)?;
+        let (total, _octets) = pop.stat()?;
+        let mut out = FolderSync {
+            folder_id: folder.id,
+            imap_name: folder.imap_name.clone(),
+            total,
+            ..FolderSync::default()
+        };
+        let rules: Vec<Rule> = self.store.list_rules(account_id)?;
+        for (seq, uidl) in pop.uidl_all()? {
+            // UIDL 去重（账号范围）：收过的信不再下正文 —— 被规则/用户挪到
+            // 别的箱的信也算收过，不能下两遍。
+            if self
+                .store
+                .get_message_uidl_account(account_id, &uidl)?
+                .is_some()
+            {
+                continue;
+            }
+            match pop.retrieve(seq) {
+                Ok(raw) => match self.ingest_pop3(account_id, &folder, &uidl, &raw, &rules)? {
+                    Ingested::Ok => out.fetched += 1,
+                    Ingested::Broken => {
+                        out.broken += 1;
+                        out.fetched += 1;
+                    }
+                    Ingested::Moved { .. } => {
+                        // 信确实下载了（落在目标箱），收信数和挪箱数都得算
+                        out.fetched += 1;
+                        out.moved += 1;
+                    }
+                },
+                Err(e) => {
+                    // 一封取不下不该让整次同步失败 —— 下轮再试
+                    tracing::warn!(seq, uidl = %uidl, "RETR 失败，跳过: {e}");
+                    out.broken += 1;
+                }
+            }
+        }
+        pop.quit().ok();
+        Ok(out)
+    }
+
     pub fn refresh_folders(&self, conn: &mut Conn, account_id: i64) -> Result<Vec<Folder>> {
         let mut out = Vec::new();
         for remote in conn.list_folders()? {
@@ -544,6 +597,121 @@ impl<'s> SyncEngine<'s> {
         }
 
         Ok(Ingested::Ok)
+    }
+
+    /// POP3 版入库：解析 + 来信分类 + 落库。和 [`Self::ingest`] 的差别：
+    ///
+    /// - 没有 `conn` —— 规则挪箱只改本地 `folder_id`（信直接落目标箱），
+    ///   不推服务器（POP3 也没有服务器标志/文件夹可推）；
+    /// - 标志从空开始（新信未读），规则的标记动作叠上去；
+    /// - 身份是 **UIDL**：落库后记到行上，下轮增量去重靠它。
+    fn ingest_pop3(
+        &self,
+        account_id: i64,
+        folder: &Folder,
+        uidl: &str,
+        raw: &[u8],
+        rules: &[Rule],
+    ) -> Result<Ingested> {
+        let received_at = Utc::now();
+        let size = Some(raw.len() as u64);
+
+        let parsed = match mime::parse_message(raw) {
+            Ok(p) => p,
+            Err(e) => {
+                // 一封坏信不该让整次同步失败（同 ingest 的态度）
+                tracing::warn!(uidl = %uidl, "解析失败，占位入库: {e}");
+                let uid = self.store.next_message_uid(folder.id)?;
+                let raw_path = self.store.write_raw(account_id, folder.id, uid, raw)?;
+                let id = self.store.upsert_message(&NewMessage {
+                    account_id,
+                    folder_id: folder.id,
+                    uid,
+                    message_id: "",
+                    subject: "（无法解析的邮件）",
+                    from: vec![],
+                    to: vec![],
+                    date: None,
+                    size,
+                    flags: Flags::default(),
+                    has_attachments: false,
+                    preview: "",
+                    body_text: None,
+                    received_at,
+                    raw_path: Some(&raw_path),
+                })?;
+                self.store.set_message_uidl(id, uidl)?;
+                return Ok(Ingested::Broken);
+            }
+        };
+
+        let text = parsed.body_text.clone().unwrap_or_default();
+        let preview = sanitize::build_preview(&text);
+
+        // ---- 来信分类（本地） --------------------------------------------
+        let from_text = rules::addrs_text(&parsed.from);
+        let to_text = rules::addrs_text(&parsed.to);
+        let mail_text = MailText {
+            from: &from_text,
+            to: &to_text,
+            subject: &parsed.subject,
+            body: &text,
+        };
+        let applied = rules::apply_all(rules, &mail_text);
+
+        let mut flags = Flags::default();
+        if applied.mark_read {
+            flags.seen = true;
+        }
+        if applied.mark_flagged {
+            flags.flagged = true;
+        }
+
+        // 挪箱 = 选好落脚点再建行（(folder_id, uid) 唯一，uid 按目标箱分配）。
+        // 目标不能是收件箱/自己 —— 和 ingest 同一条规矩。
+        let mut target = folder.clone();
+        if let Some(target_id) = applied.move_to {
+            if let Some(t) = self
+                .store
+                .get_folder(target_id)?
+                .filter(|t| t.id != folder.id && t.kind != FolderKind::Inbox)
+            {
+                tracing::info!(uidl = %uidl, to = %t.display_name, "来信分类：本地挪箱");
+                target = t;
+            } else {
+                tracing::warn!(uidl = %uidl, folder_id = target_id, "规则指向的文件夹不可用，落在收件箱");
+            }
+        }
+        let uid = self.store.next_message_uid(target.id)?;
+        let raw_path = self.store.write_raw(account_id, target.id, uid, raw)?;
+
+        let id = self.store.upsert_message(&NewMessage {
+            account_id,
+            folder_id: target.id,
+            uid,
+            message_id: parsed.message_id.as_deref().unwrap_or(""),
+            subject: &parsed.subject,
+            from: parsed.from.clone(),
+            to: parsed.to.clone(),
+            date: parsed.date,
+            size,
+            flags: flags.clone(),
+            has_attachments: parsed.has_attachments(),
+            preview: &preview,
+            body_text: Some(&text),
+            received_at,
+            raw_path: Some(&raw_path),
+        })?;
+        self.store.set_message_uidl(id, uidl)?;
+        if !applied.labels.is_empty() {
+            self.store.set_message_labels(id, &applied.labels)?;
+        }
+
+        if target.id != folder.id {
+            Ok(Ingested::Moved { target: target.id })
+        } else {
+            Ok(Ingested::Ok)
+        }
     }
 
     /// 本地有就取出来，没有就按 LIST 的响应建一个。

@@ -117,6 +117,7 @@ fn main() {
             commands::core_ping,
             commands::list_accounts,
             commands::create_account,
+            commands::test_account_login,
             commands::list_folders,
             commands::create_folder,
             commands::rename_folder,

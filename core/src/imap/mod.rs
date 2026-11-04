@@ -280,7 +280,10 @@ impl Conn {
     /// 只取 header，不取正文 —— 列表页不需要正文，取了也是浪费带宽。
     /// `BODY.PEEK` 而不是 `BODY`：后者会顺手置 `\Seen`，收信不该改已读。
     pub fn uid_fetch_meta(&mut self, uid_set: &str) -> Result<Vec<FetchedMeta>> {
-        const QUERY: &str = "UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER]";
+        // 查询串**自带括号**：RFC 3501 要求多个 fetch-att 必须括起来，而 imap crate
+        // 发的裸列表（`UID FETCH n UID FLAGS …`）——Gmail 等容忍，Coremail（163/126）
+        // 只认第一个属性（真实服务器实测：响应只剩 `(UID n)`，原文全丢）。
+        const QUERY: &str = "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER])";
 
         let fetches = match &mut self.session {
             AnySession::Plain(s) => s.uid_fetch(uid_set, QUERY),
@@ -310,8 +313,8 @@ impl Conn {
     /// 由 UI 决定，不该由「取原文」这个动作决定。
     pub fn uid_fetch_raw(&mut self, uid: u32) -> Result<Vec<u8>> {
         let fetches = match &mut self.session {
-            AnySession::Plain(s) => s.uid_fetch(uid.to_string(), "BODY.PEEK[]"),
-            AnySession::Tls(s) => s.uid_fetch(uid.to_string(), "BODY.PEEK[]"),
+            AnySession::Plain(s) => s.uid_fetch(uid.to_string(), "(BODY.PEEK[])"),
+            AnySession::Tls(s) => s.uid_fetch(uid.to_string(), "(BODY.PEEK[])"),
         }
         .map_err(|e| Error::Imap(e.to_string()))?;
 
@@ -328,7 +331,7 @@ impl Conn {
     ///
     /// `BODY.PEEK[]` 不置 `\Seen` —— 「收到信」和「读了信」是两件事。
     pub fn uid_fetch_full(&mut self, uid_set: &str) -> Result<Vec<FetchedFull>> {
-        const QUERY: &str = "UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[]";
+        const QUERY: &str = "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[])";
 
         let fetches = match &mut self.session {
             AnySession::Plain(s) => s.uid_fetch(uid_set, QUERY),
@@ -356,8 +359,8 @@ impl Conn {
     /// 尤其是刚开始同步几百封的时候。
     pub fn uid_fetch_flags(&mut self, uid_set: &str) -> Result<Vec<(u32, Flags)>> {
         let fetches = match &mut self.session {
-            AnySession::Plain(s) => s.uid_fetch(uid_set, "UID FLAGS"),
-            AnySession::Tls(s) => s.uid_fetch(uid_set, "UID FLAGS"),
+            AnySession::Plain(s) => s.uid_fetch(uid_set, "(UID FLAGS)"),
+            AnySession::Tls(s) => s.uid_fetch(uid_set, "(UID FLAGS)"),
         }
         .map_err(|e| Error::Imap(e.to_string()))?;
 
@@ -476,7 +479,7 @@ fn login<T: std::io::Read + std::io::Write>(
     is_oauth: bool,
 ) -> Result<::imap::Session<T>> {
     // login 失败会把 client 还回来（可以再试），我们不需要，丢掉它
-    if is_oauth {
+    let mut session = if is_oauth {
         // XOAUTH2（Google 等）：`secret` 是 access_token，走 `authenticate`
         let auth = Xoauth2Auth {
             user: cfg.username.clone(),
@@ -489,7 +492,17 @@ fn login<T: std::io::Read + std::io::Write>(
         client
             .login(cfg.username.as_str(), secret)
             .map_err(|(e, _client)| Error::ImapAuth(e.to_string()))
+    }?;
+
+    // 声明客户端身份（RFC 2971 ID）。163/126 不认无名客户端：不发这句
+    // SELECT 会报「Unsafe Login」（真实服务器实测）。失败不致命 ——
+    // 别的服务器不支持 ID 也不影响收信。
+    if let Err(e) = session.run_command_and_check_ok(
+        r#"ID ("name" "Mailway" "version" "0.1.0" "vendor" "mailway")"#,
+    ) {
+        tracing::debug!("服务器不认 ID 命令（不影响收信）: {e}");
     }
+    Ok(session)
 }
 
 /// XOAUTH2 的认证器：`process` 返回原始 SASL 字节（握手会 base64 后发）。

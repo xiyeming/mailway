@@ -44,5 +44,11 @@ encoding_rs = "0.8"
 # 内嵌图片 cid: → data: URI 用
 base64 = "0.22"
 
+[patch.crates-io]
+imap-proto = { path = "vendor/imap-proto" }
+
+# imap-proto 0.10.2 不认识 RFC 2971 的 `* ID (...)` 无标签行，会把 imap crate
+# 的响应读循环打崩；vendor 一份加了兜底解析（见 vendor/imap-proto/PATCH-NOTES.md）。
+
 [profile.dev]
 incremental = true

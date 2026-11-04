@@ -212,6 +212,21 @@ impl SyncReport {
 /// 不要拿它当列表刷新用 —— 列表刷新读本地库就行。
 #[tauri::command(rename_all = "snake_case")]
 pub fn sync_account(state: State<'_, AppState>, account_id: i64) -> Result<SyncReport, String> {
+    let account = state
+        .store
+        .get_account(account_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这个账号"))?;
+    // POP3 走自己的同步（UIDL 增量，没有文件夹/标志概念）
+    if account.protocol == Protocol::Pop3 {
+        let password = secrets::get(&state.store, &account)
+            .map_err(e)?
+            .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
+        let mut pop = mailway_core::pop3::Conn::for_account(&account, &password).map_err(e)?;
+        let out = SyncEngine::new(&state.store).sync_pop3(&mut pop, account.id);
+        pop.quit().ok();
+        return Ok(SyncReport::from_outs(vec![out.map_err(e)?]));
+    }
     let (account, mut conn) = connect(&state, account_id)?;
     let outs = SyncEngine::new(&state.store)
         .sync_account(&mut conn, account.id)
@@ -228,6 +243,21 @@ pub fn sync_folder(state: State<'_, AppState>, folder_id: i64) -> Result<FolderS
         .get_folder(folder_id)
         .map_err(e)?
         .ok_or_else(|| not_found("这个文件夹"))?;
+    // POP3：没有「单个服务器文件夹」可同步，整账号一轮（只会新增）
+    let account = state
+        .store
+        .get_account(folder.account_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这个账号"))?;
+    if account.protocol == Protocol::Pop3 {
+        let password = secrets::get(&state.store, &account)
+            .map_err(e)?
+            .ok_or_else(|| "还没有这个账号的授权码，去账号设置里填一下".to_string())?;
+        let mut pop = mailway_core::pop3::Conn::for_account(&account, &password).map_err(e)?;
+        let out = SyncEngine::new(&state.store).sync_pop3(&mut pop, account.id);
+        pop.quit().ok();
+        return Ok(out.map_err(e)?.into());
+    }
     let (_account, mut conn) = connect(&state, folder.account_id)?;
     let out = SyncEngine::new(&state.store)
         .sync_folder(&mut conn, folder.account_id, &folder)
@@ -344,6 +374,9 @@ fn push_flags(
     let account = store
         .get_account(folder.account_id)?
         .ok_or_else(|| Error::Config("账号已不存在".into()))?;
+    if account.protocol == Protocol::Pop3 {
+        return Ok(()); // POP3 没有服务器标志，已读/标星是纯本地概念
+    }
     let password = secrets::get(store, &account)?
         .ok_or_else(|| Error::Secret("没有授权码".into()))?;
 
@@ -536,12 +569,15 @@ pub fn delete_event(state: State<'_, AppState>, id: i64) -> Result<(), String> {
 
 // ============================================================= 域名自动配置（M6）
 
-/// 邮箱域名 → IMAP/SMTP 服务器（前端加账号填表用）。字段同 `Security`。
+/// 邮箱域名 → IMAP/POP3/SMTP 服务器（前端加账号填表用）。字段同 `Security`。
 #[derive(serde::Serialize)]
 pub struct AutoConfig {
     pub imap_host: String,
     pub imap_port: u16,
     pub imap_security: Security,
+    pub pop3_host: String,
+    pub pop3_port: u16,
+    pub pop3_security: Security,
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_security: Security,
@@ -554,6 +590,9 @@ pub fn autoconfig(email: String) -> Option<AutoConfig> {
         imap_host: c.imap_host,
         imap_port: c.imap_port,
         imap_security: c.imap_security,
+        pop3_host: c.pop3_host,
+        pop3_port: c.pop3_port,
+        pop3_security: c.pop3_security,
         smtp_host: c.smtp_host,
         smtp_port: c.smtp_port,
         smtp_security: c.smtp_security,
@@ -778,6 +817,9 @@ fn push_seen(store: &Store, folder_id: i64, uids: &[u32]) -> CoreResult<()> {
     let account = store
         .get_account(folder.account_id)?
         .ok_or_else(|| Error::Config("账号已不存在".into()))?;
+    if account.protocol == Protocol::Pop3 {
+        return Ok(()); // 同 push_flags：POP3 标志纯本地
+    }
     let password = secrets::get(store, &account)?
         .ok_or_else(|| Error::Secret("没有授权码".into()))?;
     let mut conn = Conn::for_account(&account, &password)?;
@@ -816,6 +858,13 @@ pub fn delete_message(
         .get_folder(folder_id)
         .map_err(e)?
         .ok_or_else(|| not_found("这个文件夹"))?;
+
+    // POP3：删信就是删本地行 —— 服务器上「只拉不删」，DELE 一律不用
+    if let Ok(Some(account)) = state.store.get_account(folder.account_id) {
+        if account.protocol == Protocol::Pop3 {
+            return state.store.delete_message(message_id).map_err(e);
+        }
+    }
 
     let trash_id = if permanent {
         None
@@ -871,11 +920,17 @@ pub fn move_message(
     if from_id == to_folder_id {
         return Ok(());
     }
-    state
+    let to_folder = state
         .store
         .get_folder(to_folder_id)
         .map_err(e)?
         .ok_or_else(|| not_found("目标文件夹"))?;
+    // POP3：没有服务器文件夹，挪箱是纯本地的
+    if let Ok(Some(account)) = state.store.get_account(to_folder.account_id) {
+        if account.protocol == Protocol::Pop3 {
+            return state.store.move_message_local(message_id, to_folder_id).map_err(e);
+        }
+    }
 
     let store = Arc::clone(&state.store);
     std::thread::Builder::new()
@@ -1214,6 +1269,7 @@ pub struct NewAccountInput {
     /// 显示名，也是发信时 `From:` 上那个名字
     pub name: String,
     pub email: String,
+    /// 收信服务器（IMAP 或 POP3，看 `protocol`）
     pub imap_host: String,
     pub imap_port: u16,
     pub imap_security: Security,
@@ -1226,6 +1282,59 @@ pub struct NewAccountInput {
     pub password: String,
     /// 登录方式：`password`（默认）或 `xoauth2`。
     pub auth_type: Option<String>,
+    /// 收信协议：`imap`（默认）或 `pop3`。POP3 的收信服务器也填在
+    /// `imap_host/port/security` 那一组里 —— 表单就一套收信字段。
+    pub protocol: Option<String>,
+}
+
+/// 添加前的**真实服务器**登录测试：收信（IMAP 或 POP3）和发信（SMTP）都真的
+/// 连一遍登录，不存任何东西。哪一步失败就报哪一步 —— 这就是「接上真实邮件
+/// 服务器」的当场验收，不用等后台同步去撞。
+#[tauri::command(rename_all = "snake_case")]
+pub fn test_account_login(input: NewAccountInput) -> Result<String, String> {
+    let is_oauth = input.auth_type.as_deref() == Some("xoauth2");
+
+    // ---- 收信 -------------------------------------------------------
+    let recv = match input.protocol.as_deref() {
+        Some("pop3") => {
+            let cfg = mailway_core::pop3::Config {
+                host: input.imap_host.clone(),
+                port: input.imap_port,
+                security: input.imap_security,
+                username: input.username.clone(),
+            };
+            let mut c = mailway_core::pop3::Conn::connect(&cfg, &input.password, is_oauth)
+                .map_err(|err| format!("收信（POP3）失败：{}", err.user_message()))?;
+            c.quit().ok();
+            "POP3 收信登录成功"
+        }
+        _ => {
+            let cfg = mailway_core::imap::Config {
+                host: input.imap_host.clone(),
+                port: input.imap_port,
+                security: input.imap_security,
+                username: input.username.clone(),
+                default_folder: "INBOX".into(),
+            };
+            let mut c = Conn::connect(&cfg, &input.password, is_oauth)
+                .map_err(|err| format!("收信（IMAP）失败：{}", err.user_message()))?;
+            c.logout().ok();
+            "IMAP 收信登录成功"
+        }
+    };
+
+    // ---- 发信 -------------------------------------------------------
+    let scfg = mailway_core::smtp::Config {
+        host: input.smtp_host.clone(),
+        port: input.smtp_port,
+        security: input.smtp_security,
+        username: input.username.clone(),
+    };
+    let mut s = mailway_core::smtp::Conn::connect(&scfg, &input.password, is_oauth)
+        .map_err(|err| format!("发信（SMTP）失败：{}", err.user_message()))?;
+    s.quit().ok();
+
+    Ok(format!("{recv}；SMTP 发信登录成功"))
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1238,7 +1347,10 @@ pub fn create_account(
         .insert_account(&NewAccount {
             name: &input.name,
             email: &input.email,
-            protocol: Protocol::Imap,
+            protocol: match input.protocol.as_deref() {
+                Some("pop3") => Protocol::Pop3,
+                _ => Protocol::Imap,
+            },
             imap_host: &input.imap_host,
             imap_port: input.imap_port,
             imap_security: input.imap_security,

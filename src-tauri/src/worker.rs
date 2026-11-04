@@ -25,7 +25,7 @@ use mailway_core::error::Result;
 use mailway_core::imap::Conn;
 use mailway_core::store::Store;
 use mailway_core::sync::{FolderSync, SyncEngine};
-use mailway_core::types::{Account, Folder, FolderKind};
+use mailway_core::types::{Account, Folder, FolderKind, Protocol};
 
 use crate::secrets;
 
@@ -40,6 +40,10 @@ const IDLE_INTERVAL: Duration = Duration::from_secs(20 * 60);
 
 /// 还没授权码时的轮询间隔。填好密码后最迟这么久就能用上。
 const WAIT_FOR_SECRET: Duration = Duration::from_secs(30);
+
+/// POP3 轮询间隔。POP3 没有 IDLE（RFC 1939 没有推送），只能定时问。
+/// 3 分钟：比 wyemail 常见的 5 分钟勤一点，又不至于把服务器问烦。
+const POP3_POLL: Duration = Duration::from_secs(3 * 60);
 
 /// 连不上的退避：5 秒起，翻倍到 5 分钟封顶。
 const BACKOFF_MIN: Duration = Duration::from_secs(5);
@@ -85,6 +89,60 @@ pub fn spawn(app: tauri::AppHandle, store: Arc<Store>) {
 // ================================================================= 循环
 
 fn run(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
+    match account.protocol {
+        Protocol::Pop3 => run_pop3(app, store, account),
+        Protocol::Imap => run_imap(app, store, account),
+    }
+}
+
+/// POP3 循环：连上 → 收一轮 → 断开 → 睡一会再来。没有 IDLE 可等，
+/// 也没有服务器标志可刷 —— 每轮就是一次纯增量收信。
+fn run_pop3(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
+    let mut backoff = BACKOFF_MIN;
+
+    loop {
+        let password = match secrets::get(&store, &account) {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                tracing::debug!(account = %account.email, "还没授权码，后台同步待命");
+                thread::sleep(WAIT_FOR_SECRET);
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(account = %account.email, "取授权码失败: {}", e.user_message());
+                thread::sleep(backoff);
+                backoff = (backoff * 2).min(BACKOFF_MAX);
+                continue;
+            }
+        };
+
+        let mut pop = match mailway_core::pop3::Conn::for_account(&account, &password) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(account = %account.email, "POP3 连不上: {}", e.user_message());
+                thread::sleep(backoff);
+                backoff = (backoff * 2).min(BACKOFF_MAX);
+                continue;
+            }
+        };
+        backoff = BACKOFF_MIN;
+        drop(password);
+
+        match SyncEngine::new(&store).sync_pop3(&mut pop, account.id) {
+            Ok(out) => report(&app, account.id, std::slice::from_ref(&out)),
+            Err(e) => {
+                tracing::warn!(account = %account.email, "POP3 同步失败: {}", e.user_message());
+                thread::sleep(backoff);
+                backoff = (backoff * 2).min(BACKOFF_MAX);
+                continue;
+            }
+        }
+        pop.quit().ok();
+        thread::sleep(POP3_POLL);
+    }
+}
+
+fn run_imap(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
     let mut backoff = BACKOFF_MIN;
 
     loop {

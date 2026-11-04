@@ -23,7 +23,7 @@ use crate::rules::{Action, Condition, Rule};
 use crate::types::*;
 
 /// 当前 schema 版本。以后改表结构要在这里 +`migrations` 里同时加。
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -648,6 +648,82 @@ impl Store {
             conn.prepare("SELECT * FROM messages WHERE folder_id = ?1 AND uid = ?2")?;
         let row = stmt.query_row(params![folder_id, uid], row_to_stored).optional()?;
         Ok(row)
+    }
+
+    /// 按 POP3 的 UIDL 找信（**账号范围**）。增量收信的去重入口 —— POP3 的序号
+    /// 会随服务器删信而漂，UIDL 才是那封信的身份（RFC 1939 §7）。按账号而不是
+    /// 按箱找：被来信分类/用户挪去别的箱的信不能下两遍。
+    pub fn get_message_uidl_account(
+        &self,
+        account_id: i64,
+        uidl: &str,
+    ) -> Result<Option<StoredMessage>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT * FROM messages WHERE account_id = ?1 AND uidl = ?2 LIMIT 1")?;
+        let row = stmt.query_row(params![account_id, uidl], row_to_stored).optional()?;
+        Ok(row)
+    }
+
+    /// 本地挪箱（POP3 专用）：POP3 没有服务器文件夹，`UID MOVE` 无从谈起，
+    /// 改改本地行就够了。uid 按目标箱重新发一个，别和目标箱里的旧信撞。
+    pub fn move_message_local(&self, id: i64, to_folder_id: i64) -> Result<()> {
+        let uid = self.next_message_uid(to_folder_id)?;
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE messages SET folder_id = ?2, uid = ?3 WHERE id = ?1",
+            params![id, to_folder_id, uid],
+        )?;
+        Ok(())
+    }
+
+    /// 给 POP3 新信发一个本地 uid（箱内最大 +1）。POP3 没有服务器 uid，
+    /// 序号又会漂，所以本地用递增号占位 —— 唯一职责是不撞 (folder_id, uid)。
+    pub fn next_message_uid(&self, folder_id: i64) -> Result<u32> {
+        let conn = self.lock()?;
+        let max: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(uid), 0) FROM messages WHERE folder_id = ?1",
+            params![folder_id],
+            |r| r.get(0),
+        )?;
+        Ok((max as u32).saturating_add(1))
+    }
+
+    /// 把 UIDL 记到已入库的行上（POP3 下次增量去重用）。
+    /// 已经有值就别覆盖 —— 同一封信被规则挪箱后重新落行的场景用不上重写。
+    pub fn set_message_uidl(&self, id: i64, uidl: &str) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE messages SET uidl = ?2 WHERE id = ?1",
+            params![id, uidl],
+        )?;
+        Ok(())
+    }
+
+    /// 保证账号有一个收件箱文件夹，返回它。IMAP 账号的文件夹由 LIST 建；
+    /// POP3 只有收件箱，同步前用这个把行建出来。
+    pub fn ensure_inbox_folder(&self, account_id: i64) -> Result<Folder> {
+        if let Some(f) = self
+            .list_folders(account_id)?
+            .into_iter()
+            .find(|f| f.kind == crate::types::FolderKind::Inbox)
+        {
+            return Ok(f);
+        }
+        let id = self.upsert_folder(&NewFolder {
+            account_id,
+            imap_name: "INBOX",
+            display_name: "收件箱",
+            kind: crate::types::FolderKind::Inbox,
+            parent_id: None,
+            delimiter: Some('/'),
+            subscribed: true,
+        })?;
+        self.get_folder(id)?.ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!(
+                "upsert_folder 刚建的收件箱(id={id})又查不到"
+            ))
+        })
     }
 
     pub fn set_message_flags(&self, id: i64, flags: &Flags) -> Result<()> {
@@ -1395,6 +1471,18 @@ fn migrate(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    // v5 → v6：messages 加 `uidl`（POP3 的稳定标识，增量去重用；IMAP 不用）。
+    // POP3 的序号会随服务器删信而漂，UIDL 才是那封信的身份。
+    if !has_column(conn, "messages", "uidl")? {
+        conn.execute(
+            "ALTER TABLE messages ADD COLUMN uidl TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_uidl ON messages(folder_id, uidl)",
+            [],
+        )?;
+    }
 
     let current: Option<String> = conn
         .query_row(
@@ -1450,6 +1538,14 @@ fn migrate(conn: &Connection) -> Result<()> {
             )?;
             tracing::info!("数据库 schema 4 → {}", SCHEMA_VERSION);
         }
+        // v5 → v6：messages 加 `uidl`（POP3）。同上，改动已补完，只抬版本号。
+        Some(v) if v.parse::<i64>().unwrap_or(0) == 5 => {
+            conn.execute(
+                "UPDATE schema_meta SET value = ?1 WHERE key = 'version'",
+                params![SCHEMA_VERSION.to_string()],
+            )?;
+            tracing::info!("数据库 schema 5 → {}", SCHEMA_VERSION);
+        }
         Some(v) => {
             // 以后有新迁移就往上加分支。版本对不上只能报错 —— 静默降级比崩溃更危险。
             return Err(Error::Config(format!(
@@ -1502,6 +1598,13 @@ fn parse_security(s: &str) -> Security {
     }
 }
 
+fn parse_protocol(s: &str) -> Protocol {
+    match s {
+        "pop3" => Protocol::Pop3,
+        _ => Protocol::Imap,
+    }
+}
+
 fn security_str(s: Security) -> &'static str {
     match s {
         Security::Plain => "plain",
@@ -1541,7 +1644,7 @@ fn row_to_account(r: &Row) -> rusqlite::Result<Account> {
         id: r.get("id")?,
         name: r.get("name")?,
         email: r.get("email")?,
-        protocol: Protocol::Imap,
+        protocol: parse_protocol(&r.get::<_, String>("protocol")?),
         imap_host: r.get("imap_host")?,
         imap_port: r.get("imap_port")?,
         imap_security: parse_security(&r.get::<_, String>("imap_security")?),
@@ -1828,6 +1931,7 @@ impl rusqlite::ToSql for Protocol {
     fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
         Ok(rusqlite::types::ToSqlOutput::from(match self {
             Protocol::Imap => "imap",
+            Protocol::Pop3 => "pop3",
         }))
     }
 }

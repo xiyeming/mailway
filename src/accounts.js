@@ -35,7 +35,23 @@ const invoke = globalThis.__TAURI__?.core?.invoke;
 /// 每种加密方式的默认端口。和 `core/src/types.rs` 的 `Security` 对应，
 /// 值就是它序列化出来的那些（`plain` / `ssl` / `start_tls`）。
 const IMAP_PORTS = { plain: 143, ssl: 993, start_tls: 143 };
+const POP3_PORTS = { plain: 110, ssl: 995, start_tls: 110 };
 const SMTP_PORTS = { plain: 25, ssl: 465, start_tls: 587 };
+
+// 供应商速选（对照 wyemail 添加页的 163/126/QQ/Gmail 快捷按钮）：
+// 点了填域名 → 自动配置，顺便给一句该家的登录提醒。
+const PROVIDERS = [
+  ["Gmail", "gmail.com", "Gmail 推荐点「使用 Google 登录」；密码登录需开 IMAP 并用应用专用密码"],
+  ["163", "163.com", "163 需在网页版设置里开启 IMAP/POP3/SMTP，并生成授权码"],
+  ["126", "126.com", "126 同 163：网页版开启服务并生成授权码"],
+  ["QQ", "qq.com", "QQ 邮箱需在设置里开启服务并生成授权码"],
+  ["Outlook", "outlook.com", ""],
+  ["Yahoo", "yahoo.com", ""],
+  ["139", "139.com", ""],
+  ["189", "189.cn", ""],
+  ["iCloud", "icloud.com", "iCloud 用 App 专用密码登录"],
+  ["自定义", "", "自己填收发服务器"],
+];
 
 /// 单选上那几个字。键就是 `Security` 序列化出来的值。
 const LABELS = { plain: "明文", ssl: "SSL", start_tls: "STARTTLS" };
@@ -70,6 +86,9 @@ export function closeAccountForm() {
 function buildForm(onSaved) {
   // 登录方式：默认授权码；「Google 登录」后改 `xoauth2`（`password` 里放的是 token）。
   let authType = "password";
+  // 收信协议：IMAP（默认）或 POP3。收发服务器字段两套协议共用，
+  // POP3 的主机/端口也填在「收信」那组里。
+  let recvProto = "imap";
   // ---- 账号本身 -------------------------------------------------------
   const name = textInput("acc-name", "text", "发信时显示的名字");
   const email = textInput("acc-email", "email", "you@example.com");
@@ -85,7 +104,12 @@ function buildForm(onSaved) {
   imapPort.value = "993";
   smtpPort.value = "465";
 
-  const imapSec = securityRadios("imap_security", IMAP_PORTS, imapPort, "ssl");
+  const imapSec = securityRadios(
+    "imap_security",
+    () => (recvProto === "pop3" ? POP3_PORTS : IMAP_PORTS),
+    imapPort,
+    "ssl",
+  );
   const smtpSec = securityRadios("smtp_security", SMTP_PORTS, smtpPort, "ssl");
 
   // ---- 底栏 -----------------------------------------------------------
@@ -108,16 +132,25 @@ function buildForm(onSaved) {
       return; // 自动配置挂了不影响手填
     }
     if (!cfg) return;
-    // 只补空的、或上一次自动填过（没被手改）的，别盖掉用户手动填的。
+    // 只补空的、或之前自动填过（没被手改）的，别盖掉用户手动填的。
+    // 「自动填过」两套都算：字段里可能是上个协议（IMAP↔POP3）留下的自动值。
+    const fillRecv = (input, val, ...prevs) => {
+      const cur = input.value.trim();
+      const auto = prevs.some((p) => p != null && String(p) === cur);
+      if (cur === "" || (lastAuto && auto)) input.value = val;
+    };
     const fill = (input, val, prev) => {
       const cur = input.value.trim();
       if (cur === "" || (lastAuto && String(cur) === String(prev))) input.value = val;
     };
-    fill(imapHost, cfg.imap_host, lastAuto?.imap_host);
-    fill(imapPort, String(cfg.imap_port), String(lastAuto?.imap_port));
+    const recvHost = recvProto === "pop3" ? cfg.pop3_host : cfg.imap_host;
+    const recvPort = recvProto === "pop3" ? cfg.pop3_port : cfg.imap_port;
+    const recvSec = recvProto === "pop3" ? cfg.pop3_security : cfg.imap_security;
+    fillRecv(imapHost, recvHost, lastAuto?.imap_host, lastAuto?.pop3_host);
+    fillRecv(imapPort, String(recvPort), lastAuto?.imap_port, lastAuto?.pop3_port);
     fill(smtpHost, cfg.smtp_host, lastAuto?.smtp_host);
     fill(smtpPort, String(cfg.smtp_port), String(lastAuto?.smtp_port));
-    setSecurity("imap_security", cfg.imap_security);
+    setSecurity("imap_security", recvSec);
     setSecurity("smtp_security", cfg.smtp_security);
     lastAuto = cfg;
     status.textContent = `已按 @${v.split("@")[1]} 自动填好收发服务器（可改）`;
@@ -136,12 +169,97 @@ function buildForm(onSaved) {
     text: "添加",
   });
 
+  // ---- 收信协议切换（IMAP / POP3，对照 wyemail 的收信类型选择）----------
+  const protoHint = node("p", {
+    class: "form-hint",
+    text: "POP3 只收信：已读/标星仅保存在本地；邮件保留在服务器上不删。",
+  });
+  const mkProtoBtn = (value, label) => {
+    const b = node("button", {
+      class: "btn proto-btn", type: "button", text: label,
+      onclick: () => setProto(value),
+    });
+    b.dataset.value = value;
+    return b;
+  };
+  const protoRow = node("div", { class: "form-row" },
+    node("span", { class: "form-label", text: "收信协议" }),
+    node("div", { class: "form-radios", role: "group", "aria-label": "收信协议" },
+      mkProtoBtn("imap", "IMAP"),
+      mkProtoBtn("pop3", "POP3"),
+    ),
+    protoHint,
+  );
+  function setProto(value) {
+    recvProto = value;
+    protoRow.querySelectorAll(".proto-btn").forEach((b) => {
+      const on = b.dataset.value === value;
+      b.classList.toggle("is-on", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+    // 换协议就把收信主机/端口换成对应那套（手填过就不盖）
+    applyAutoconfig();
+  }
+  setProto("imap");
+
+  // ---- 真实服务器登录测试（不保存）-------------------------------------
+  const testBtn = node("button", {
+    class: "btn", type: "button", text: "测试登录",
+    title: "真的连一遍收发服务器，不保存",
+    onclick: testLogin,
+  });
+
+  function buildInput() {
+    return {
+      name: name.value.trim(),
+      email: email.value.trim(),
+      imap_host: imapHost.value.trim(),
+      imap_port: Number(imapPort.value),
+      imap_security: imapSec.value(),
+      smtp_host: smtpHost.value.trim(),
+      smtp_port: Number(smtpPort.value),
+      smtp_security: smtpSec.value(),
+      username: username.value.trim(),
+      password: password.value,
+      auth_type: authType,
+      protocol: recvProto,
+    };
+  }
+
+  async function testLogin() {
+    status.textContent = "正在连接服务器…";
+    testBtn.disabled = true;
+    try {
+      status.textContent = await invoke("test_account_login", { input: buildInput() });
+    } catch (err) {
+      status.textContent = String(err instanceof Error ? err.message : err);
+    } finally {
+      testBtn.disabled = false;
+    }
+  }
+
   const root = node("div", { class: "scrim", role: "dialog", "aria-label": "添加账号" },
     node("form", { class: "dialog", onsubmit: onSubmit },
       node("header", { class: "dialog-head" },
         node("h2", { class: "dialog-title", text: "添加账号" }),
       ),
       node("div", { class: "dialog-body" },
+        node("div", { class: "acc-chips", role: "group", "aria-label": "常用邮箱" },
+          PROVIDERS.map(([label, domain, hint]) =>
+            node("button", {
+              class: "btn acc-chip", type: "button", text: label,
+              onclick: () => {
+                if (domain) {
+                  const local = email.value.split("@")[0].trim();
+                  email.value = local ? `${local}@${domain}` : `@${domain}`;
+                  applyAutoconfig();
+                }
+                status.textContent = hint || "";
+                email.focus();
+              },
+            }),
+          ),
+        ),
         node("div", { class: "form-grid" },
           field("acc-name", "名称", name),
           field("acc-email", "邮箱", email),
@@ -158,8 +276,9 @@ function buildForm(onSaved) {
           }),
         ),
         node("fieldset", { class: "form-group" },
-          node("legend", { class: "form-legend", text: "收信（IMAP）" }),
-          hostPortRow("IMAP 主机", imapHost, "端口", imapPort),
+          node("legend", { class: "form-legend", text: "收信" }),
+          protoRow,
+          hostPortRow("收信主机", imapHost, "端口", imapPort),
           imapSec.el,
         ),
         node("fieldset", { class: "form-group" },
@@ -175,6 +294,7 @@ function buildForm(onSaved) {
           class: "btn", type: "button", text: "取消",
           onclick: closeAccountForm,
         }),
+        testBtn,
         saveBtn,
       ),
     ),
@@ -204,19 +324,7 @@ function buildForm(onSaved) {
   }
 
   async function save() {
-    const input = {
-      name: name.value.trim(),
-      email: email.value.trim(),
-      imap_host: imapHost.value.trim(),
-      imap_port: Number(imapPort.value),
-      imap_security: imapSec.value(),
-      smtp_host: smtpHost.value.trim(),
-      smtp_port: Number(smtpPort.value),
-      smtp_security: smtpSec.value(),
-      username: username.value.trim(),
-      password: password.value,
-      auth_type: authType,
-    };
+    const input = buildInput();
 
     const bad = validate(input, { email, username, password, imapHost, smtpHost, imapPort, smtpPort });
     if (bad) {
@@ -329,16 +437,20 @@ function textInput(id, type, placeholder) {
  * 端口只在它**还空着或还停在某个默认值**时才动；用户自己填的数字一次都不碰。
  */
 function securityRadios(name, ports, portInput, checked) {
-  // 这个协议的全部默认端口。判「是不是用户自己填的」用它，不用单个值：
-  // IMAP 的明文和 STARTTLS 都是 143，从 143 换到 993 再换回来还得认得出来。
-  const known = new Set(Object.values(ports).map(String));
+  // `ports` 可以是表，也可以是「按当前收信协议取表」的函数 —— 收信那组的
+  // 端口要随 IMAP/POP3 切换（993/143 ↔ 995/110）。
+  const portsMap = () => (typeof ports === "function" ? ports() : ports);
 
-  const inputs = Object.keys(ports).map((value) => {
+  const inputs = Object.keys(portsMap()).map((value) => {
     const el = node("input", { type: "radio", id: `${name}-${value}`, name, value });
     if (value === checked) el.checked = true;
     el.addEventListener("change", () => {
+      const map = portsMap();
+      // 判「是不是用户自己填的」用整张表，不用单个值：明文和 STARTTLS 常同端口，
+      // 来回切还得认得出来。
+      const known = new Set(Object.values(map).map(String));
       if (el.checked && (portInput.value === "" || known.has(portInput.value))) {
-        portInput.value = String(ports[value]);
+        portInput.value = String(map[value]);
       }
     });
     return node("label", { for: el.id }, el, node("span", { text: LABELS[value] }));

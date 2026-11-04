@@ -25,6 +25,8 @@ base64.workspace = true
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "net", "time"] }
 tempfile = "3"
+# 回归测试用：验证 163 风格（空格填充日期）的 FETCH 响应能解析出全部属性
+imap-proto = "0.10"
 # 集成测试要直接开一个「v1 的老库」来验迁移。光靠 mailway-core 的公开 API 建不出
 # 那种库（建库那条路本身就是新的），只能自己拿 rusqlite 拼一个。
 rusqlite.workspace = true
