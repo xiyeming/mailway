@@ -795,6 +795,8 @@ function openFolderCtxMenu(e, account, folder) {
     );
   }
   // 光标处弹出。坐标走 CSSOM（CSP `style-src 'self'` 不管 `el.style.x`），clamp 进视口。
+  // `right: auto` 必须清掉：基础样式的 `right: 0` 和 left 同时生效会把菜单拉满屏宽。
+  menu.style.right = "auto";
   menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
   menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 150))}px`;
   document.body.append(menu);
