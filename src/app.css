@@ -18,8 +18,8 @@
   --bg-hover: #eef0f4;
   --bg-active: #e2e6ee;
   --fg: #1c1f26;
-  --fg-muted: #6b7280;
-  --fg-faint: #9aa1ad;
+  --fg-muted: #59616e;
+  --fg-faint: #79818e;
   --line: #e3e6ec;
   --accent: #2f6feb;
   --accent-fg: #ffffff;
@@ -3022,4 +3022,73 @@ button:focus-visible,
 .mailbox-sig {
   resize: vertical;
   min-height: 8rem;
+}
+
+
+/* ================================ 收信按钮旋转（同步中） ================= */
+@keyframes mailway-spin {
+  to { transform: rotate(360deg); }
+}
+
+.spin-icon {
+  display: inline-block;
+}
+
+.icon-btn.is-spinning .spin-icon {
+  animation: mailway-spin 0.9s linear infinite;
+}
+
+/* ================================ toast（右下浮层提示） ================= */
+.toast-wrap {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 2100;
+  transform: translateZ(0); /* 同 .scrim：躲开滚动条合成层 */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.toast {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.95rem;
+  font-size: 13px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 16%);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.toast.is-out {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+
+/* ================================ 添加账号：高级折叠 ================= */
+.adv-toggle {
+  align-self: flex-start;
+  padding: 0.25rem 0.15rem;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.adv-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.adv-box[hidden] {
+  display: none;
 }

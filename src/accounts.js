@@ -166,8 +166,10 @@ function buildForm(onSaved) {
   const saveBtn = node("button", {
     class: "btn btn-primary",
     type: "submit",
-    text: "添加",
+    text: "登录",
   });
+
+
 
   // ---- 收信协议切换（IMAP / POP3，对照 wyemail 的收信类型选择）----------
   const protoHint = node("p", {
@@ -219,7 +221,7 @@ function buildForm(onSaved) {
       smtp_host: smtpHost.value.trim(),
       smtp_port: Number(smtpPort.value),
       smtp_security: smtpSec.value(),
-      username: username.value.trim(),
+      username: username.value.trim() || email.value.trim(),
       password: password.value,
       auth_type: authType,
       protocol: recvProto,
@@ -238,6 +240,40 @@ function buildForm(onSaved) {
     }
   }
 
+  // 高级设置（默认收起）：用户名/协议/主机端口都在这里
+  const adv = node("div", { class: "adv-box", hidden: true },
+    field("acc-user", "用户名", username),
+    node("fieldset", { class: "form-group" },
+      node("legend", { class: "form-legend", text: "收信" }),
+      protoRow,
+      hostPortRow("收信主机", imapHost, "端口", imapPort),
+      imapSec.el,
+    ),
+    node("fieldset", { class: "form-group" },
+      node("legend", { class: "form-legend", text: "发信（SMTP）" }),
+      hostPortRow("SMTP 主机", smtpHost, "端口", smtpPort),
+      smtpSec.el,
+    ),
+    testBtn,
+  );
+  const advToggle = node("button", {
+    class: "btn adv-toggle", type: "button", id: "btn-adv", text: "高级设置 ▾",
+    "aria-expanded": "false",
+    onclick: () => {
+      adv.hidden = !adv.hidden;
+      advToggle.setAttribute("aria-expanded", String(!adv.hidden));
+      advToggle.textContent = adv.hidden ? "高级设置 ▾" : "高级设置 ▴";
+    },
+  });
+
+  // 主按钮统一「登录」：Gmail 域名时同位置变「使用 Google 登录」（OAuth），
+  // 不再有独立的 Google 按钮。
+  const isGmail = () => /@(gmail|googlemail)\.com$/i.test(email.value.trim());
+  const updateLoginBtn = () => {
+    saveBtn.textContent = isGmail() ? "使用 Google 登录" : "登录";
+  };
+  email.addEventListener("input", updateLoginBtn);
+
   const root = node("div", { class: "scrim", role: "dialog", "aria-label": "添加账号" },
     node("form", { class: "dialog", onsubmit: onSubmit },
       node("header", { class: "dialog-head" },
@@ -252,6 +288,7 @@ function buildForm(onSaved) {
                 if (domain) {
                   const local = email.value.split("@")[0].trim();
                   email.value = local ? `${local}@${domain}` : `@${domain}`;
+                  updateLoginBtn();
                   applyAutoconfig();
                 }
                 status.textContent = hint || "";
@@ -263,29 +300,14 @@ function buildForm(onSaved) {
         node("div", { class: "form-grid" },
           field("acc-name", "名称", name),
           field("acc-email", "邮箱", email),
-          field("acc-user", "用户名", username),
           field("acc-pass", "授权码", password),
-          node("button", {
-            class: "btn", type: "button", id: "btn-google-login", text: "使用 Google 登录",
-            title: "Gmail 走 OAuth，不用填授权码",
-            onclick: googleLogin,
-          }),
           node("p", {
             class: "form-hint",
-            text: "授权码不是登录密码：各家邮箱都要先在网页上单独生成一个，只给客户端用。Gmail 可直接「使用 Google 登录」。",
+            text: "授权码不是登录密码：各家邮箱要先在网页版单独生成（Gmail 无需授权码，直接登录）。",
           }),
         ),
-        node("fieldset", { class: "form-group" },
-          node("legend", { class: "form-legend", text: "收信" }),
-          protoRow,
-          hostPortRow("收信主机", imapHost, "端口", imapPort),
-          imapSec.el,
-        ),
-        node("fieldset", { class: "form-group" },
-          node("legend", { class: "form-legend", text: "发信（SMTP）" }),
-          hostPortRow("SMTP 主机", smtpHost, "端口", smtpPort),
-          smtpSec.el,
-        ),
+        advToggle,
+        adv,
         node("p", { class: "form-hint", text: "加完直接切过去。" }),
       ),
       node("footer", { class: "dialog-foot" },
@@ -294,7 +316,6 @@ function buildForm(onSaved) {
           class: "btn", type: "button", text: "取消",
           onclick: closeAccountForm,
         }),
-        testBtn,
         saveBtn,
       ),
     ),
@@ -324,6 +345,11 @@ function buildForm(onSaved) {
   }
 
   async function save() {
+    // Gmail 且没填授权码 → 先走统一「登录」里的 OAuth（webview），拿到令牌再存
+    if (isGmail() && !password.value.trim()) {
+      await googleLogin();
+      if (!password.value.trim()) return; // 用户取消了授权
+    }
     const input = buildInput();
 
     const bad = validate(input, { email, username, password, imapHost, smtpHost, imapPort, smtpPort });

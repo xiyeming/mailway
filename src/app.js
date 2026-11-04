@@ -378,7 +378,7 @@ function buildMail(stage) {
           node("button", {
             class: "icon-btn", id: "btn-sync", type: "button",
             title: "收信（F5）", "aria-label": "收信", onclick: syncNow,
-          }, node("span", { "aria-hidden": "true", text: "↻" }), node("span", { text: "收信" })),
+          }, node("span", { class: "spin-icon", "aria-hidden": "true", text: "↻" }), node("span", { text: "收信" })),
           node("span", { class: "muted sync-status", id: "sync-status" }),
         ),
         node("input", {
@@ -1192,8 +1192,22 @@ function updateListCount() {
 
 /** 轻量状态提示（写进列表头的 `sync-status`）。不弹窗、不抢焦点。 */
 function statusNote(msg) {
-  const el = document.getElementById("sync-status");
-  if (el) el.textContent = msg;
+  toast(msg);
+}
+
+/** 浮动 toast（右下角，自动消失）。状态类提示统一走这里。 */
+function toast(msg) {
+  let wrap = document.querySelector(".toast-wrap");
+  if (!wrap) {
+    wrap = node("div", { class: "toast-wrap", "aria-live": "polite" });
+    document.body.append(wrap);
+  }
+  const t = node("div", { class: "toast", text: msg });
+  wrap.append(t);
+  setTimeout(() => {
+    t.classList.add("is-out");
+    setTimeout(() => t.remove(), 320);
+  }, 2800);
 }
 
 async function selectFolder(folderId) {
@@ -2104,9 +2118,8 @@ async function syncNow() {
   if (syncing || !state.account) return;
   syncing = true;
   const btn = document.getElementById("btn-sync");
-  const status = document.getElementById("sync-status");
   btn.disabled = true;
-  status.textContent = "同步中…";
+  btn.classList.add("is-spinning"); // 收信图标转起来
 
   try {
     const report = await invoke("sync_account", { account_id: state.account.id });
@@ -2114,13 +2127,14 @@ async function syncNow() {
     if (report.fetched > 0) parts.push(`收到 ${report.fetched} 封`);
     if (report.broken > 0) parts.push(`${report.broken} 封解析失败`);
     if (report.rebuilt > 0) parts.push(`${report.rebuilt} 个文件夹重建`);
-    status.textContent = parts.length > 0 ? parts.join("，") : "已经是最新";
+    toast(parts.length > 0 ? parts.join("，") : "已经是最新");
     await reloadAfterSync();
   } catch (err) {
-    status.textContent = `同步失败：${err instanceof Error ? err.message : err}`;
+    toast(`同步失败：${err instanceof Error ? err.message : err}`);
   } finally {
     syncing = false;
     btn.disabled = false;
+    btn.classList.remove("is-spinning");
   }
 }
 
