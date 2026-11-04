@@ -3121,3 +3121,111 @@ button:focus-visible,
   flex-shrink: 0;
   width: 5.25rem;
 }
+
+
+/* ==================== 添加账号弹窗：版式（美化） ====================== */
+/* 厂商速选：等宽网格，两行排得整齐，不再有孤零零的「自定义」 */
+.acc-dialog .acc-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.4rem, 1fr));
+  gap: 0.45rem;
+  margin-bottom: 0;
+}
+
+.acc-dialog .acc-chip {
+  padding: 0.34rem 0.4rem;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 基本信息：标签在上、输入框满宽（比左右分栏更紧凑好读） */
+.acc-dialog .form-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.32rem;
+}
+
+.acc-dialog .form-label {
+  padding-top: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* 「主机 + 端口」这种拆分行保持一行 */
+.acc-dialog .form-row.is-split {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.acc-dialog .form-row.is-split .form-label {
+  flex-shrink: 0;
+}
+
+.acc-dialog .form-row.is-split .form-input[type="number"] {
+  width: 5.25rem;
+}
+
+/* 收信协议一行式保持一行（同 proto-line 基础样式，作用域内重申） */
+.acc-dialog .proto-line {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.acc-dialog .proto-line .form-label {
+  padding-top: 0;
+}
+
+/* 高级设置：整行分隔条 + 右侧箭头 */
+.acc-dialog .adv-toggle {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.15rem;
+  padding: 0.7rem 0.15rem 0.2rem;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+}
+
+.acc-dialog .adv-toggle:hover {
+  color: var(--accent);
+}
+
+.acc-dialog .adv-arrow {
+  font-size: 11px;
+}
+
+/* 高级区的 fieldset 去掉重框，只留小标题（更轻） */
+.acc-dialog .form-group {
+  padding: 0.15rem 0 0.35rem;
+  border: none;
+  border-radius: 0;
+}
+
+.acc-dialog .form-legend {
+  padding: 0 0 0.45rem;
+  color: var(--fg-faint);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* 提示行紧凑些 */
+.acc-dialog .form-hint {
+  margin-top: -0.15rem;
+}
+
+/* 状态行在脚部左侧顶开按钮 */
+.acc-dialog .dialog-status {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 高级区里的按钮（测试登录）自然宽、左对齐 */
+.acc-dialog .adv-box > .btn {
+  align-self: flex-start;
+}

@@ -113,7 +113,7 @@ function buildForm(onSaved) {
   const smtpSec = securityRadios("smtp_security", SMTP_PORTS, smtpPort, "ssl");
 
   // ---- 底栏 -----------------------------------------------------------
-  const status = node("span", { class: "dialog-status muted", text: "" });
+  const status = node("span", { class: "dialog-status muted", text: "加完自动切到该账号。" });
 
   // ---- 域名自动配置（M6）：填了邮箱就把收发服务器补上（可改）-----------
   let lastAuto = null;
@@ -264,15 +264,17 @@ function buildForm(onSaved) {
     ),
     testBtn,
   );
+  const advLabel = node("span", { text: "高级设置" });
+  const advArrow = node("span", { class: "adv-arrow", "aria-hidden": "true", text: "▾" });
   const advToggle = node("button", {
-    class: "btn adv-toggle", type: "button", id: "btn-adv", text: "高级设置 ▾",
+    class: "btn adv-toggle", type: "button", id: "btn-adv",
     "aria-expanded": "false",
     onclick: () => {
       adv.hidden = !adv.hidden;
       advToggle.setAttribute("aria-expanded", String(!adv.hidden));
-      advToggle.textContent = adv.hidden ? "高级设置 ▾" : "高级设置 ▴";
+      advArrow.textContent = adv.hidden ? "▾" : "▴";
     },
-  });
+  }, advLabel, advArrow);
 
   // 主按钮统一「登录」：Gmail 域名时同位置变「使用 Google 登录」（OAuth），
   // 不再有独立的 Google 按钮。
@@ -283,7 +285,7 @@ function buildForm(onSaved) {
   email.addEventListener("input", updateLoginBtn);
 
   const root = node("div", { class: "scrim", role: "dialog", "aria-label": "添加账号" },
-    node("form", { class: "dialog", onsubmit: onSubmit },
+    node("form", { class: "dialog acc-dialog", onsubmit: onSubmit },
       node("header", { class: "dialog-head" },
         node("h2", { class: "dialog-title", text: "添加账号" }),
       ),
@@ -316,7 +318,6 @@ function buildForm(onSaved) {
         ),
         advToggle,
         adv,
-        node("p", { class: "form-hint", text: "加完直接切过去。" }),
       ),
       node("footer", { class: "dialog-foot" },
         status,
