@@ -81,6 +81,21 @@
   box-sizing: border-box;
 }
 
+:root {
+  color-scheme: light;
+}
+
+/* 深色主题：原生控件（select 下拉、滚动条）跟主题走，别弹出系统色 */
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* WebKitGTK 的 option 列表不完全吃 color-scheme，显式给色双保险 */
+select option {
+  background: var(--bg);
+  color: var(--fg);
+}
+
 html,
 body {
   height: 100%;
@@ -1240,24 +1255,30 @@ body {
   background: var(--bg-active);
 }
 
-/* 子文件夹展开/收起箭头（有子才有；留空位对齐） */
+/* 子文件夹展开/收起箭头（有子才有；留空位对齐）。要醒目：16px + 加重色 + hover 圆底 */
 .side-caret {
-  flex: 0 0 1.25rem;
-  width: 1.25rem;
+  flex: 0 0 1.55rem;
+  width: 1.55rem;
+  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
   border: 0;
+  border-radius: 999px;
   background: none;
-  color: var(--fg-faint);
-  font-size: 13px;
+  color: var(--fg-muted);
+  font-size: 16px;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
-  text-align: center;
-  transition: color 120ms ease;
+  transition: color 120ms ease, background 120ms ease;
 }
 
 .side-caret:hover,
 .side-caret:focus-visible {
   color: var(--accent);
+  background: var(--bg-hover);
 }
 
 .side-caret.is-empty {
@@ -1273,7 +1294,7 @@ body {
 
 .side-icon {
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .side-name {
@@ -1533,7 +1554,7 @@ body {
   justify-content: center;
   border-radius: 999px;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 15px;
   background: var(--bg);
   box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
   opacity: 0;
@@ -1560,7 +1581,7 @@ body {
   background: none;
   color: var(--fg-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -2170,7 +2191,7 @@ button:focus-visible,
 
 .from-caret {
   color: var(--fg-faint);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .compose-fields {
