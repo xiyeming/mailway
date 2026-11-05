@@ -50,3 +50,13 @@ export function flipMenuOverflow() {
     }
   }
 }
+
+/** 右键菜单按光标摆位。**先入 DOM 再调**——量的是真实尺寸（菜单几项就多高，
+ *  写死 320px 的旧猜法在九项菜单上必裁底）。四边贴 8px 边距兜住不出屏。 */
+export function placeMenuAt(menu, x, y) {
+  const r = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(x, window.innerWidth - r.width - 8));
+  const top = Math.max(8, Math.min(y, window.innerHeight - r.height - 8));
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+}

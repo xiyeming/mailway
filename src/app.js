@@ -13,7 +13,7 @@
 // IPC 参数名走 snake_case（`rename_all = "snake_case"`），和 Rust 完全一致。
 // Tauri 默认转 camelCase，那会在两份代码之间多一层对不上的名字。
 
-import { node, clear, flipMenuOverflow } from "./dom.js";
+import { node, clear, flipMenuOverflow, placeMenuAt } from "./dom.js";
 import { openCompose } from "./compose.js";
 import { openAccountForm } from "./accounts.js";
 
@@ -868,10 +868,9 @@ function openSmartCtxMenu(e, account) {
     }),
   );
   menu.style.right = "auto";
-  menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
-  menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 150))}px`;
   overlay.append(menu);
   document.body.append(overlay);
+  placeMenuAt(menu, e.clientX, e.clientY);
 }
 
 /** 智能箱「全标已读」：当前视图里所有未读批量标已读。 */
@@ -1001,12 +1000,11 @@ function openFolderCtxMenu(e, account, folder) {
     );
   }
 
-  // 光标处弹出
+  // 光标处弹出（量真实尺寸再摆，别猜高度——九项菜单猜 320px 必裁底）
   menu.style.right = "auto";
-  menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
-  menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 320))}px`;
   overlay.append(menu);
   document.body.append(overlay);
+  placeMenuAt(menu, e.clientX, e.clientY);
 }
 
 /** 文件夹「全标已读」：本地一条 UPDATE + 后台推服务器。 */
@@ -1738,10 +1736,9 @@ function openMessageCtxMenu(e, t) {
   }
 
   menu.style.right = "auto";
-  menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
-  menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 260))}px`;
   overlay.append(menu);
   document.body.append(overlay);
+  placeMenuAt(menu, e.clientX, e.clientY);
 }
 
 /** 从列表行发起 回复/回复全部/转发（先取详情再开撰写窗）。 */
@@ -2581,8 +2578,10 @@ function showMore(btn, menu) {
   // `el.style.x`（那是 CSSOM 操作，CSP 不拦）。设完向下不超过视口。
   const r = btn.getBoundingClientRect();
   menu.classList.add("is-fixed");
-  menu.style.top = `${Math.round(Math.min(r.bottom + 4, window.innerHeight - 200))}px`;
+  menu.style.top = ""; // 先占位再量真实高，钳完再定 top（200px 是猜的，会裁）
   menu.style.right = `${Math.round(Math.max(8, window.innerWidth - r.right))}px`;
+  const h = menu.getBoundingClientRect().height;
+  menu.style.top = `${Math.round(Math.max(8, Math.min(r.bottom + 4, window.innerHeight - h - 8)))}px`;
   openMore = { btn, menu };
 }
 
