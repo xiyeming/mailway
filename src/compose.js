@@ -409,6 +409,9 @@ function buildCompose(initialAccount) {
     fromBtn.setAttribute("aria-expanded", "false");
     moreMenu.hidden = true;
     tplMenu.hidden = true;
+    // 自绘下拉（字号/字体/颜色/高亮/插入/对齐/列表）也全关 ——
+    // 原先漏了它们，点外面菜单不消失，是「收不起来」的另一半根因
+    document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
     document.querySelectorAll(".compose .more-wrap > button").forEach((b) => b.setAttribute("aria-expanded", "false"));
   }
   document.addEventListener("click", closeAllComposeMenus);
@@ -925,6 +928,10 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
         button.setAttribute("aria-expanded", "true");
       },
     });
+    // 菜单内点击不冒泡到 document —— 「点外面才关」的对偶。
+    // 顺带救了取色器拖拽：不然 pointerdown 冒出去菜单当场关。
+    menu.addEventListener("click", (e) => e.stopPropagation());
+    menu.addEventListener("pointerdown", (e) => e.stopPropagation());
     wrap.append(button, menu);
     wrap._menu = menu;
     wrap._button = button;
@@ -1108,27 +1115,42 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
       }
     }
     // 自绘取色器：**不弹 GTK 系统取色框**（那窗口跟系统深色走，不听主题）。
+    // 「更多颜色」是真 toggle：展开 ↔ 收起，按钮常驻不藏（藏了就没退路）。
+    const toggleBtn = node("button", {
+      class: "btn", type: "button", text: "展开 ▾",
+      "aria-label": "自由选择颜色", "aria-expanded": "false",
+      onclick: (e) => {
+        e.stopPropagation();
+        collapsePicker();
+      },
+    });
     const customRow = node("div", { class: "color-custom" },
       node("span", { text: "更多颜色" }),
-      node("button", {
-        class: "btn", type: "button", text: "展开 ▾",
-        "aria-label": "自由选择颜色",
-        onclick: (e) => {
-          e.stopPropagation();
-          customRow.hidden = true;
-          wrap._menu.append(pickerWrap);
-        },
-      }),
+      toggleBtn,
     );
-    const pickerWrap = makePicker(customDefault, (hex) => {
-      document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
-      pickerWrap.remove();
-      customRow.hidden = false;
-      run(cmd, hex);
-    }, () => {
-      pickerWrap.remove();
-      customRow.hidden = false;
-    });
+    let pickerWrap = null;
+    const openPicker = () => {
+      if (pickerWrap) return;
+      pickerWrap = makePicker(customDefault, (hex) => {
+        document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
+        closePicker();
+        run(cmd, hex);
+      }, closePicker);
+      wrap._menu.append(pickerWrap);
+      toggleBtn.textContent = "收起 ▴";
+      toggleBtn.setAttribute("aria-expanded", "true");
+    };
+    const closePicker = () => {
+      if (pickerWrap) pickerWrap.remove();
+      pickerWrap = null;
+      toggleBtn.textContent = "展开 ▾";
+      toggleBtn.setAttribute("aria-expanded", "false");
+    };
+    // 点 toggle：开着就收，关着就开
+    function collapsePicker() {
+      if (pickerWrap) closePicker();
+      else openPicker();
+    }
     const wrap = dropdown(title, title, [
       grid,
       node("div", { class: "more-sep" }),
