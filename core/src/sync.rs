@@ -311,6 +311,33 @@ impl<'s> SyncEngine<'s> {
             })
     }
 
+    /// 建**子文件夹**（「新建子文件夹」）：wire 名 = 父 wire 名 + 分隔符 + utf7(子名)。
+    /// 分隔符是字面量、不进 utf7 编码；行直接 upsert（LIST 的显示名带父前缀，
+    /// 按显示名找不到）。
+    pub fn create_subfolder(
+        &self,
+        conn: &mut Conn,
+        account_id: i64,
+        parent: &Folder,
+        name: &str,
+    ) -> Result<Folder> {
+        let delim = parent.delimiter.unwrap_or('/');
+        let wire = format!("{}{}{}", parent.imap_name, delim, crate::imap::utf7::encode(name));
+        conn.create_folder_wire(&wire)?;
+        let id = self.store.upsert_folder(&NewFolder {
+            account_id,
+            imap_name: &wire,
+            display_name: name,
+            kind: FolderKind::Normal,
+            parent_id: Some(parent.id),
+            delimiter: parent.delimiter,
+            subscribed: true,
+        })?;
+        self.store.get_folder(id)?.ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("刚建的子文件夹(id={id})又查不到了"))
+        })
+    }
+
     /// 改文件夹名。**先服务器、后本地**：反过来断在中间，下趟 LIST 会把
     /// 新名当新箱子插一行，旧的那行还指着旧名，一个箱子裂成两个。
     /// 本地 `messages` 不用动 —— 换的是箱子名，箱子 id 没变。

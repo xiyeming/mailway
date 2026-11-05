@@ -112,6 +112,7 @@ pub async fn create_folder(
     state: State<'_, AppState>,
     account_id: i64,
     name: String,
+    parent_folder_id: Option<i64>,
 ) -> Result<Folder, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -120,8 +121,20 @@ pub async fn create_folder(
     let store = Arc::clone(&state.store);
     let pool = Arc::clone(&state.pool);
     tauri::async_runtime::spawn_blocking(move || {
+        // 有父级 → 建子文件夹（wire 名带父前缀，分隔符是字面量）
+        let parent = match parent_folder_id {
+            Some(pid) => match store.get_folder(pid) {
+                Ok(Some(p)) => Some(p),
+                _ => return Err("父文件夹不存在".to_string()),
+            },
+            None => None,
+        };
         pool.with(account_id, |conn| {
-            SyncEngine::new(&store).create_folder(conn, account_id, &name)
+            let engine = SyncEngine::new(&store);
+            match &parent {
+                Some(p) => engine.create_subfolder(conn, account_id, p, &name),
+                None => engine.create_folder(conn, account_id, &name),
+            }
         })
         .map_err(e)
     })
@@ -1013,6 +1026,185 @@ fn delete_message_remote(store: &Store, pool: &ConnPool<Conn>, folder_id: i64, u
     pool.with(account.id, |conn| {
         SyncEngine::new(store).delete_message(conn, &folder, uid)
     })
+}
+
+// ================================================================= 文件夹菜单
+
+/// 新邮件提醒（文件夹级）。关了就不为这个箱的新信弹桌面通知。
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_folder_remind(state: State<'_, AppState>, folder_id: i64, on: bool) -> Result<(), String> {
+    state.store.set_folder_remind(folder_id, on).map_err(e)
+}
+
+/// 快捷文件夹开关：侧栏「快捷文件夹」区置顶显示。
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_folder_quick(state: State<'_, AppState>, folder_id: i64, on: bool) -> Result<(), String> {
+    state.store.set_folder_quick(folder_id, on).map_err(e)
+}
+
+/// 「邮件批量删除」：清空这个文件夹的全部邮件。
+/// 语义：废纸篓 = 彻底删除；其他箱 = 全部挪废纸篓（没有废纸篓就彻底删）。
+/// 本地先清，服务器后台批量推（每箱一趟）。前端两步确认，这里只管动手。
+#[tauri::command(rename_all = "snake_case")]
+pub fn clear_folder_mails(state: State<'_, AppState>, folder_id: i64) -> Result<u32, String> {
+    let folder = state
+        .store
+        .get_folder(folder_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这个文件夹"))?;
+    let account = state
+        .store
+        .get_account(folder.account_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这个账号"))?;
+    let uids = state.store.delete_messages_in_folder(folder_id).map_err(e)?;
+    let n = uids.len() as u32;
+    if n == 0 || account.protocol == Protocol::Pop3 {
+        return Ok(n); // POP3 只拉不删，本地清了就完了
+    }
+    let permanent = folder.kind == FolderKind::Trash;
+    let trash = if permanent {
+        None
+    } else {
+        state
+            .store
+            .list_folders(account.id)
+            .map_err(e)?
+            .into_iter()
+            .find(|f| f.kind == FolderKind::Trash && f.id != folder_id)
+    };
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    let spawned = std::thread::Builder::new()
+        .name("mailway-clear-folder".into())
+        .spawn(move || {
+            let res: CoreResult<()> = (|| {
+                pool.with(account.id, |conn| {
+                    let engine = SyncEngine::new(&store);
+                    match &trash {
+                        Some(t) => engine.batch_move(conn, &folder, &uids, t),
+                        None => engine.batch_delete(conn, &folder, &uids),
+                    }
+                })?;
+                if let Some(t) = trash {
+                    let _ = pool.with(account.id, |conn| {
+                        SyncEngine::new(&store).sync_folder(conn, account.id, &t)
+                    });
+                }
+                Ok(())
+            })();
+            if let Err(err) = res {
+                tracing::warn!(folder_id, "清空文件夹推服务器失败: {}", err.user_message());
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!("起清空文件夹线程失败: {err}");
+    }
+    Ok(n)
+}
+
+/// 「对本地邮件执行来信分类」：把已收的信逐封过一遍规则。
+/// 动作：挪箱（本地先挪、后台批量推服务器并追平目标箱）、标已读/星标
+/// （本地+服务器）、贴标签（本地）。返回人话摘要。
+#[tauri::command(rename_all = "snake_case")]
+pub fn apply_rules_to_folder(state: State<'_, AppState>, folder_id: i64) -> Result<String, String> {
+    use mailway_core::rules::{self as rules_mod, MailText};
+    let folder = state
+        .store
+        .get_folder(folder_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这个文件夹"))?;
+    let account = state
+        .store
+        .get_account(folder.account_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这个账号"))?;
+    let rules = state.store.list_rules(account.id).map_err(e)?;
+    if rules.is_empty() {
+        return Err("还没有来信分类规则（设置 → 邮箱设置 → 来信分类）".into());
+    }
+    let mails = state.store.list_folder_mails(folder_id).map_err(e)?;
+    let (mut moved, mut read, mut flagged, mut labeled) = (0u32, 0u32, 0u32, 0u32);
+    let mut moves: Vec<(u32, i64)> = Vec::new(); // (uid, target)
+    let mut flag_changes: Vec<(i64, u32, Flags, Flags)> = Vec::new();
+
+    for m in &mails {
+        let from_text = rules_mod::addrs_text(&m.from);
+        let to_text = rules_mod::addrs_text(&m.to);
+        let body = m.body_text.as_deref().unwrap_or("");
+        let mail_text = MailText { from: &from_text, to: &to_text, subject: &m.subject, body };
+        let applied = rules_mod::apply_all(&rules, &mail_text);
+        if applied.mark_read || applied.mark_flagged {
+            let Ok(Some(stored)) = state.store.get_message_raw(m.id) else { continue };
+            let old = stored.summary.flags.clone();
+            let mut new = old.clone();
+            if applied.mark_read {
+                new.seen = true;
+                read += 1;
+            }
+            if applied.mark_flagged {
+                new.flagged = true;
+                flagged += 1;
+            }
+            if new != old {
+                state.store.set_message_flags(m.id, &new).map_err(e)?;
+                flag_changes.push((folder_id, m.uid, old, new));
+            }
+        }
+        if !applied.labels.is_empty() {
+            state.store.set_message_labels(m.id, &applied.labels).map_err(e)?;
+            labeled += 1;
+        }
+        if let Some(target) = applied.move_to {
+            // 不挪回自己、不挪进收件箱（同 ingest 的规矩）
+            let ok = target != folder_id
+                && state
+                    .store
+                    .get_folder(target)
+                    .ok()
+                    .flatten()
+                    .map(|t| t.kind != FolderKind::Inbox)
+                    .unwrap_or(false);
+            if ok {
+                state.store.move_message_local(m.id, target).map_err(e)?;
+                moves.push((m.uid, target));
+                moved += 1;
+            }
+        }
+    }
+
+    push_flags_batch_in_background(&state, flag_changes);
+    if !moves.is_empty() {
+        let store = Arc::clone(&state.store);
+        let pool = Arc::clone(&state.pool);
+        let src_folder = folder.clone();
+        let account_id = account.id;
+        let spawned = std::thread::Builder::new()
+            .name("mailway-rules-move".into())
+            .spawn(move || {
+                use std::collections::HashMap;
+                let mut by_target: HashMap<i64, Vec<u32>> = HashMap::new();
+                for (uid, target) in moves {
+                    by_target.entry(target).or_default().push(uid);
+                }
+                for (target_id, uids) in by_target {
+                    let Ok(Some(target)) = store.get_folder(target_id) else { continue };
+                    let _ = pool.with(account_id, |conn| {
+                        SyncEngine::new(&store).batch_move(conn, &src_folder, &uids, &target)
+                    });
+                    let _ = pool.with(account_id, |conn| {
+                        SyncEngine::new(&store).sync_folder(conn, account_id, &target)
+                    });
+                }
+            });
+        if let Err(err) = spawned {
+            tracing::warn!("起来信分类挪箱线程失败: {err}");
+        }
+    }
+
+    Ok(format!(
+        "来信分类已执行：挪箱 {moved} 封、标已读 {read} 封、标星 {flagged} 封、贴标签 {labeled} 封"
+    ))
 }
 
 // ================================================================= 多选批量

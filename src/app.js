@@ -645,6 +645,27 @@ function renderSidebar() {
           name: q.name,
           count: c[q.countKey] ?? 0,
           onclick: () => openSmart(q.filter, null, q.name, !!q.isDrafts),
+          ctx: (e) => openSmartCtxMenu(e, state.account || state.accounts[0]),
+        }),
+      );
+    }
+  }
+
+  // 设为快捷文件夹的文件夹（右键文件夹可置顶）
+  const quicks = state.allFolders.filter((f) => f.quick);
+  if (quicks.length > 0) {
+    for (const f of quicks) {
+      box.append(
+        sidebarRow({
+          key: `folder:${f.id}`,
+          icon: FOLDER_ICON[f.kind] || "📁",
+          name: f.display_name,
+          count: folderUnread(f.id),
+          onclick: () => selectFolder(f.id),
+          ctx: (e) => {
+            const acc = state.accounts.find((a) => a.id === f.account_id);
+            if (acc) openFolderCtxMenu(e, acc, f);
+          },
         }),
       );
     }
@@ -697,6 +718,7 @@ function renderSidebar() {
               name: s.name,
               count: n,
               onclick: () => openSmart(s.filter, a.id, s.name, false),
+              ctx: (e) => openSmartCtxMenu(e, a),
             }),
           );
         }
@@ -768,24 +790,31 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeFolderCtx();
 });
 
-/** 右键文件夹/账号行：光标处弹操作菜单。`folder=null` = 账号行（只有新建）。
- *  菜单挂在全屏透明 overlay（同 .scrim 图层配方）里 —— 单独的 fixed 菜单
- *  在 WebKitGTK 里会被列表区的合成层压住，见 `.menu-overlay` 注释。 */
-function openFolderCtxMenu(e, account, folder) {
+/** 右键智能箱（快捷区/未读/标星）：全标已读 + 新建文件夹。 */
+function openSmartCtxMenu(e, account) {
+  if (!account) return;
   e.preventDefault();
   e.stopPropagation();
-  closeFolderCtx();
-  const canManage = !!folder && folder.id !== 0 && folder.kind !== "inbox";
+  closeAllMenus();
   const overlay = node("div", { class: "menu-overlay", role: "presentation" });
   overlay.addEventListener("mousedown", (ev) => {
-    if (ev.target === overlay) closeFolderCtx();
+    if (ev.target === overlay) overlay.remove();
   });
   const menu = node("div", { class: "more-menu is-fixed", role: "menu" });
+  menu.addEventListener("click", (ev) => ev.stopPropagation());
   menu.append(
+    node("button", {
+      class: "more-item", type: "button", role: "menuitem", text: "全标已读",
+      onclick: () => {
+        overlay.remove();
+        smartMarkAllRead();
+      },
+    }),
+    node("div", { class: "more-sep" }),
     node("button", {
       class: "more-item", type: "button", role: "menuitem", text: "新建文件夹",
       onclick: () => {
-        closeFolderCtx();
+        overlay.remove();
         openFolderNameDialog("新建文件夹", "", async (name) => {
           const f = await invoke("create_folder", { account_id: account.id, name });
           await afterFolderChange(f.id);
@@ -793,38 +822,211 @@ function openFolderCtxMenu(e, account, folder) {
       },
     }),
   );
-  if (folder) {
-    menu.append(
-      node("button", {
-        class: `more-item${canManage ? "" : " is-off"}`, type: "button", role: "menuitem",
-        text: "重命名",
-        title: canManage ? "改这个文件夹的名字" : "收件箱和本地草稿箱不能改名",
-        disabled: canManage ? null : true,
-        onclick: () => {
-          closeFolderCtx();
-          openFolderNameDialog("重命名文件夹", folder.display_name, async (name) => {
-            await invoke("rename_folder", { folder_id: folder.id, new_name: name });
-            await afterFolderChange(folder.id);
-          });
-        },
-      }),
-      node("button", {
-        class: `more-item is-danger${canManage ? "" : " is-off"}`, type: "button",
-        role: "menuitem", id: "folder-ctx-del", text: "删除",
-        title: canManage ? "删掉这个文件夹，里面的信一起删" : "收件箱和本地草稿箱不能删",
-        disabled: canManage ? null : true,
-        onclick: () => folderCtxDelete(folder),
-      }),
-    );
-  }
-  // 光标处弹出（overlay 全屏 = 视口坐标系；clamp 进视口）。
-  // `right: auto` 必须清掉：基础样式的 `right: 0` 和 left 同时生效会把菜单拉满屏宽。
   menu.style.right = "auto";
   menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
   menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 150))}px`;
   overlay.append(menu);
   document.body.append(overlay);
-  openFolderCtx = overlay;
+}
+
+/** 智能箱「全标已读」：当前视图里所有未读批量标已读。 */
+async function smartMarkAllRead() {
+  const ids = state.messages.filter((m) => !m.flags.seen).map((m) => m.id);
+  if (ids.length === 0) {
+    toast("都已读了");
+    return;
+  }
+  try {
+    await invoke("batch_set_flags", { message_ids: ids, seen: true, flagged: null });
+    for (const m of state.messages) if (ids.includes(m.id)) m.flags.seen = true;
+    repaintList();
+    updateListCount();
+    renderSidebar();
+    renderReader();
+    toast(`已标为已读 ${ids.length} 封`);
+  } catch (err) {
+    toast(`操作失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 右键文件夹/账号行：光标处弹操作菜单（对齐网易邮箱大师）。
+ *  `folder=null` = 账号行（只有新建）。 */
+function openFolderCtxMenu(e, account, folder) {
+  e.preventDefault();
+  e.stopPropagation();
+  closeAllMenus();
+  const canManage = !!folder && folder.id !== 0 && folder.kind !== "inbox";
+  const overlay = node("div", { class: "menu-overlay", role: "presentation" });
+  overlay.addEventListener("mousedown", (ev) => {
+    if (ev.target === overlay) overlay.remove();
+  });
+  const menu = node("div", { class: "more-menu is-fixed", role: "menu" });
+  menu.addEventListener("click", (ev) => ev.stopPropagation());
+  const item = (text, fn, opts = {}) =>
+    node("button", {
+      class: opts.danger ? "more-item is-danger" : "more-item",
+      type: "button",
+      role: "menuitem",
+      text,
+      ...(opts.id ? { id: opts.id } : {}),
+      ...(opts.off ? { disabled: true, title: opts.title || "" } : {}),
+      onclick: () => fn(),
+    });
+  const sep = () => node("div", { class: "more-sep" });
+
+  menu.append(
+    item("全标已读", () => {
+      overlay.remove();
+      folderMarkAllRead(folder);
+    }, { off: !folder, title: "先选一个文件夹" }),
+    sep(),
+  );
+  if (folder && canManage) {
+    menu.append(
+      item(folder.quick ? "取消快捷文件夹" : "设为快捷文件夹", () => {
+        overlay.remove();
+        toggleQuickFolder(folder);
+      }),
+      sep(),
+    );
+  }
+  menu.append(
+    item("新建文件夹", () => {
+      overlay.remove();
+      openFolderNameDialog("新建文件夹", "", async (name) => {
+        const f = await invoke("create_folder", { account_id: account.id, name });
+        await afterFolderChange(f.id);
+      });
+    }),
+    item("新建子文件夹", () => {
+      overlay.remove();
+      openFolderNameDialog(`在「${folder ? folder.display_name : account.name}」下新建`, "", async (name) => {
+        const f = await invoke("create_folder", {
+          account_id: account.id,
+          name,
+          parent_folder_id: folder ? folder.id : null,
+        });
+        await afterFolderChange(f.id);
+      });
+    }, { off: !canManage, title: "先选一个可管理的文件夹" }),
+    sep(),
+  );
+  if (folder && canManage) {
+    menu.append(
+      item(folder.remind ? "✓ 新邮件提醒" : "新邮件提醒", () => {
+        overlay.remove();
+        toggleRemind(folder);
+      }, { title: "新信落进这个箱时弹桌面通知" }),
+      sep(),
+      item("邮件批量删除", () => {
+        // 两步确认（清空整个箱，危险）
+        const btn = menu.querySelector("#ctx-clear");
+        if (btn.dataset.armed !== "1") {
+          btn.dataset.armed = "1";
+          btn.textContent = "再点一次确认清空";
+          return;
+        }
+        overlay.remove();
+        clearFolderMails(folder);
+      }, { danger: true, id: "ctx-clear", title: "清空这个文件夹里的全部邮件" }),
+      item("对本地邮件执行来信分类", () => {
+        overlay.remove();
+        applyRulesToFolder(folder);
+      }, { title: "把已收的信逐封过一遍规则（挪箱/标已读/标星/贴标签）" }),
+      sep(),
+      item("重命名", () => {
+        overlay.remove();
+        openFolderNameDialog("重命名文件夹", folder.display_name, async (name) => {
+          await invoke("rename_folder", { folder_id: folder.id, new_name: name });
+          await afterFolderChange(folder.id);
+        });
+      }),
+      item("删除", () => {
+        const btn = menu.querySelector("#ctx-del");
+        if (btn.dataset.armed !== "1") {
+          btn.dataset.armed = "1";
+          btn.textContent = "再点一次确认删除";
+          return;
+        }
+        overlay.remove();
+        invoke("delete_folder", { folder_id: folder.id })
+          .then(() => afterFolderChange(null))
+          .catch((err) => toast(`删除失败：${err instanceof Error ? err.message : err}`));
+      }, { danger: true, id: "ctx-del" }),
+    );
+  }
+
+  // 光标处弹出
+  menu.style.right = "auto";
+  menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
+  menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 320))}px`;
+  overlay.append(menu);
+  document.body.append(overlay);
+}
+
+/** 文件夹「全标已读」：本地一条 UPDATE + 后台推服务器。 */
+async function folderMarkAllRead(folder) {
+  if (!folder || folder.id == null) return;
+  try {
+    const n = await invoke("mark_folder_read", { folder_id: folder.id });
+    await refreshSidebarData();
+    renderSidebar();
+    if (state.folderId === folder.id) {
+      repaintList();
+      updateListCount();
+    }
+    toast(n > 0 ? `已标为已读 ${n} 封` : "都已读了");
+  } catch (err) {
+    toast(`操作失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 快捷文件夹开关（侧栏置顶）。 */
+async function toggleQuickFolder(folder) {
+  try {
+    const on = !folder.quick;
+    await invoke("set_folder_quick", { folder_id: folder.id, on });
+    folder.quick = on;
+    await refreshSidebarData();
+    renderSidebar();
+    toast(on ? `「${folder.display_name}」已加入快捷文件夹` : `「${folder.display_name}」已移出快捷文件夹`);
+  } catch (err) {
+    toast(`操作失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 新邮件提醒开关（文件夹级）。 */
+async function toggleRemind(folder) {
+  try {
+    const on = !folder.remind;
+    await invoke("set_folder_remind", { folder_id: folder.id, on });
+    folder.remind = on;
+    toast(on ? `「${folder.display_name}」新邮件提醒已开启` : `「${folder.display_name}」新邮件提醒已关闭`);
+  } catch (err) {
+    toast(`操作失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 邮件批量删除（清空文件夹；已两步确认）。 */
+async function clearFolderMails(folder) {
+  try {
+    const n = await invoke("clear_folder_mails", { folder_id: folder.id });
+    await afterFolderChange(folder.id);
+    toast(n > 0 ? `已清空「${folder.display_name}」${n} 封` : "这个箱是空的");
+  } catch (err) {
+    toast(`清空失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 对本地邮件执行来信分类。 */
+async function applyRulesToFolder(folder) {
+  try {
+    const msg = await invoke("apply_rules_to_folder", { folder_id: folder.id });
+    await afterFolderChange(folder.id);
+    toast(msg);
+  } catch (err) {
+    toast(`执行失败：${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /** 删除的两步确认：第一下待命，五秒内第二下才真删。 */

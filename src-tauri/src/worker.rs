@@ -307,8 +307,9 @@ fn report(app: &tauri::AppHandle, account_id: i64, outs: &[FolderSync]) {
     tracing::info!(account_id, fetched, broken, flags_changed, rebuilt, "同步完成");
     emit(app, account_id, fetched, broken, flags_changed, rebuilt);
     // 收到新信 → 桌面通知（M5，`org.freedesktop.Notifications`）。
+    // 按文件夹「新邮件提醒」开关过滤（右键文件夹可关）。
     if fetched > 0 {
-        notify_new_mail(app, account_id, fetched);
+        notify_new_mail(app, account_id, outs);
     }
 }
 
@@ -318,7 +319,7 @@ fn report(app: &tauri::AppHandle, account_id: i64, outs: &[FolderSync]) {
 ///   * `notify_popup` = off → 不弹；
 ///   * `notify_show_sender` = on → 带上最新几封的「发件人 · 主题」；
 ///   * `notify_sound` = on → 带提示音（`message-new-instant` 主题音）。
-fn notify_new_mail(app: &tauri::AppHandle, account_id: i64, fetched: u32) {
+fn notify_new_mail(app: &tauri::AppHandle, account_id: i64, outs: &[FolderSync]) {
     use tauri::Manager;
     let store = &app.state::<crate::commands::AppState>().store;
     let setting = |key: &str, default_on: bool| -> bool {
@@ -332,16 +333,33 @@ fn notify_new_mail(app: &tauri::AppHandle, account_id: i64, fetched: u32) {
         return;
     }
 
+    // 只统计「新邮件提醒」开着的箱（文件夹右键可关）
+    let folders = store.list_folders(account_id).unwrap_or_default();
+    let mut fetched = 0u32;
+    let mut sample_folder: Option<i64> = None;
+    for o in outs {
+        if o.fetched == 0 {
+            continue;
+        }
+        let remind = folders
+            .iter()
+            .find(|f| f.id == o.folder_id)
+            .map(|f| f.remind)
+            .unwrap_or(true);
+        if remind {
+            fetched += o.fetched;
+            sample_folder = Some(o.folder_id);
+        }
+    }
+    if fetched == 0 {
+        return; // 新信都落在关了提醒的箱里
+    }
+
     let mut body = format!("收到 {fetched} 封新邮件");
     if setting("notify_show_sender", true) {
-        // 最新几封的「发件人 · 主题」——收件箱最新在前
-        if let Some(inbox) = store
-            .list_folders(account_id)
-            .unwrap_or_default()
-            .into_iter()
-            .find(|f| f.kind == mailway_core::types::FolderKind::Inbox)
-        {
-            if let Ok(msgs) = store.list_messages(inbox.id, 2, 0) {
+        // 最新几封的「发件人 · 主题」——从有新信的箱里取
+        if let Some(fid) = sample_folder {
+            if let Ok(msgs) = store.list_messages(fid, 2, 0) {
                 for m in &msgs {
                     let who = m
                         .from

@@ -107,6 +107,10 @@ pub struct Folder {
     /// IMAP 的分隔符，如 `/` 或 `.`
     pub delimiter: Option<char>,
     pub subscribed: bool,
+    /// 新邮件提醒（文件夹级开关；关了就不为这个箱的新信弹通知）
+    pub remind: bool,
+    /// 设为快捷文件夹（侧栏「快捷文件夹」区置顶显示）
+    pub quick: bool,
 
     // ---------------- 同步状态
     /// IMAP UIDVALIDITY。变了就必须整箱重建，这是协议规定的硬约束。

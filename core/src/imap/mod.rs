@@ -217,8 +217,17 @@ impl Conn {
     /// 的编解码收在 Conn 这一层（[`Self::list_folders`] 的 decode 同理），
     /// 外面谁也不碰 wire 形态。[`Self::select`] / [`Self::append`] 收的仍是
     /// 库里存的 `imap_name`，那个已经是编好的。
+    /// 按 wire 名建箱（子文件夹：`父wire名/子名`，分隔符是字面量、不进 utf7 编码）。
+    pub fn create_folder_wire(&mut self, wire_name: &str) -> Result<()> {
+        self.run_create(wire_name)
+    }
+
     pub fn create_folder(&mut self, display_name: &str) -> Result<()> {
         let wire = utf7::encode(display_name);
+        self.run_create(&wire)
+    }
+
+    fn run_create(&mut self, wire: &str) -> Result<()> {
         match &mut self.session {
             AnySession::Plain(s) => s.create(wire),
             AnySession::Tls(s) => s.create(wire),

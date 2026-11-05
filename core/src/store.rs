@@ -208,6 +208,57 @@ impl Store {
         Ok(id)
     }
 
+    /// 新邮件提醒开关（文件夹级）。同步的 upsert 不碰这两列，用户偏好不丢。
+    pub fn set_folder_remind(&self, folder_id: i64, on: bool) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE folders SET remind = ?2 WHERE id = ?1",
+            params![folder_id, on as i64],
+        )?;
+        Ok(())
+    }
+
+    /// 快捷文件夹开关（侧栏置顶）。
+    pub fn set_folder_quick(&self, folder_id: i64, on: bool) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE folders SET quick = ?2 WHERE id = ?1",
+            params![folder_id, on as i64],
+        )?;
+        Ok(())
+    }
+
+    /// 列出箱里全部信的「规则匹配需要的字段」（对本地已收的信跑来信分类用）。
+    pub fn list_folder_mails(&self, folder_id: i64) -> Result<Vec<LocalMail>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, uid, subject, from_json, to_json, body_text
+               FROM messages WHERE folder_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![folder_id], |r| {
+            Ok(LocalMail {
+                id: r.get("id")?,
+                uid: r.get("uid")?,
+                subject: r.get("subject")?,
+                from: json_to_mailboxes(r.get("from_json")?),
+                to: json_to_mailboxes(r.get("to_json")?),
+                body_text: r.get("body_text")?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// 清空一个文件夹的本地邮件行（「邮件批量删除」的本地那半边）。
+    pub fn delete_messages_in_folder(&self, folder_id: i64) -> Result<Vec<u32>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare("SELECT uid FROM messages WHERE folder_id = ?1")?;
+        let uids: Vec<u32> = stmt
+            .query_map(params![folder_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        conn.execute("DELETE FROM messages WHERE folder_id = ?1", params![folder_id])?;
+        Ok(uids)
+    }
+
     pub fn list_folders(&self, account_id: i64) -> Result<Vec<Folder>> {
         let conn = self.lock()?;
         let mut stmt =
@@ -1147,6 +1198,17 @@ impl Store {
 // 「还没写库」的中间类型。和 `types` 里的读模型分开，是因为 id / received_at
 // 这些是数据库生成的，构造时还没有。
 
+/// 「对本地邮件执行来信分类」的匹配输入（存库字段直接够用，不重解析原文）。
+#[derive(Debug, Clone)]
+pub struct LocalMail {
+    pub id: i64,
+    pub uid: u32,
+    pub subject: String,
+    pub from: Vec<crate::types::Mailbox>,
+    pub to: Vec<crate::types::Mailbox>,
+    pub body_text: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewAccount<'a> {
     pub name: &'a str,
@@ -1489,6 +1551,21 @@ fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    // v6 → v7：folders 加 `remind` / `quick`（新邮件提醒、快捷文件夹开关）。
+    // 同步的 upsert 不碰这两列，用户偏好不会被同步冲掉。
+    if !has_column(conn, "folders", "remind")? {
+        conn.execute(
+            "ALTER TABLE folders ADD COLUMN remind INTEGER NOT NULL DEFAULT 1",
+            [],
+        )?;
+    }
+    if !has_column(conn, "folders", "quick")? {
+        conn.execute(
+            "ALTER TABLE folders ADD COLUMN quick INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
     let current: Option<String> = conn
         .query_row(
             "SELECT value FROM schema_meta WHERE key = 'version'",
@@ -1543,7 +1620,7 @@ fn migrate(conn: &Connection) -> Result<()> {
             )?;
             tracing::info!("数据库 schema 4 → {}", SCHEMA_VERSION);
         }
-        // v5 → v6：messages 加 `uidl`（POP3）。同上，改动已补完，只抬版本号。
+    // v5 → v6：messages 加 `uidl`（POP3）。同上，改动已补完，只抬版本号。
         Some(v) if v.parse::<i64>().unwrap_or(0) == 5 => {
             conn.execute(
                 "UPDATE schema_meta SET value = ?1 WHERE key = 'version'",
@@ -1676,6 +1753,8 @@ fn row_to_folder(r: &Row) -> rusqlite::Result<Folder> {
         parent_id: r.get("parent_id")?,
         delimiter: delimiter.and_then(|s| s.chars().next()),
         subscribed: r.get::<_, i64>("subscribed")? != 0,
+        remind: r.get::<_, i64>("remind").unwrap_or(1) != 0,
+        quick: r.get::<_, i64>("quick").unwrap_or(0) != 0,
         uid_validity: r.get("uid_validity")?,
         uid_next: r.get("uid_next")?,
         last_synced_uid: r.get("last_synced_uid")?,
