@@ -2779,7 +2779,7 @@ button:focus-visible,
 }
 
 .form-label {
-  color: var(--fg-faint);
+  color: var(--fg-muted);
   font-size: 13px;
 }
 
@@ -3463,11 +3463,13 @@ button:focus-visible,
   text-align: center;
 }
 
-/* 基本信息：标签在上、输入框满宽（比左右分栏更紧凑好读） */
+/* 基本信息：名称/输入框行式平铺，标签与输入框垂直居中
+   （早先写的 flex-direction:column 对 grid 无效，还把 align-items 拉成
+   stretch，标签就贴顶了——这就是标签和输入框不齐的根因） */
 .acc-dialog .form-row {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.32rem;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  gap: 0.65rem;
 }
 
 .acc-dialog .form-label {
