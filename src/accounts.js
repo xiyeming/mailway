@@ -361,7 +361,7 @@ function buildForm(onSaved) {
     }
     const input = buildInput();
 
-    const bad = validate(input, { email, username, password, imapHost, smtpHost, imapPort, smtpPort });
+    const bad = validate(input, { email, password, imapHost, smtpHost, imapPort, smtpPort });
     if (bad) {
       // 校验失败只说哪一项，不动已填的东西 —— 尤其是授权码。
       status.textContent = bad.message;
@@ -426,7 +426,6 @@ function validate(input, els) {
     return { message: "邮箱地址看起来不对", field: els.email };
   }
   for (const [label, v, f] of [
-    ["用户名", input.username, els.username],
     ["授权码", input.password, els.password],
     ["IMAP 主机", input.imap_host, els.imapHost],
     ["SMTP 主机", input.smtp_host, els.smtpHost],
