@@ -195,6 +195,28 @@ function buildCompose(initialAccount) {
   const cc = recipientField({ label: "抄送", placeholder: "可留空", onChange: markDirty });
   const bcc = recipientField({ label: "密送", placeholder: "收件人看不到", onChange: markDirty });
 
+  // 抄送/密送默认收着（网易默认只有收件人/主题两行）
+  const ccToggle = node("button", {
+    class: "field-toggle", type: "button", text: "抄送",
+    "aria-pressed": "false",
+    onclick: () => {
+      cc.el.hidden = !cc.el.hidden;
+      ccToggle.setAttribute("aria-pressed", String(!cc.el.hidden));
+      if (!cc.el.hidden) cc.focus();
+    },
+  });
+  const bccToggle = node("button", {
+    class: "field-toggle", type: "button", text: "密送",
+    "aria-pressed": "false",
+    onclick: () => {
+      bcc.el.hidden = !bcc.el.hidden;
+      bccToggle.setAttribute("aria-pressed", String(!bcc.el.hidden));
+      if (!bcc.el.hidden) bcc.focus();
+    },
+  });
+  cc.el.hidden = true;
+  bcc.el.hidden = true;
+
   // ---- 主题 / 正文 ----------------------------------------------------
   const subject = node("input", {
     class: "compose-subject",
@@ -206,6 +228,17 @@ function buildCompose(initialAccount) {
   const subjectRow = node("div", { class: "compose-field is-subject" },
     node("label", { class: "field-label", text: "主题" }),
     subject,
+    node("div", { class: "subject-chips", role: "group", "aria-label": "常用主题" },
+      ...["会议邀请", "周报", "请假", "通知"].map((t) =>
+        node("button", {
+          class: "subject-chip", type: "button", text: t,
+          onclick: () => {
+            subject.value = t;
+            markDirty();
+            subject.focus();
+          },
+        })),
+    ),
   );
 
   // 内联 HTML 只从这里进出，理由见文件顶部
@@ -233,16 +266,7 @@ function buildCompose(initialAccount) {
     onmousedown: (e) => e.preventDefault(),
     onclick: () => filePicker.click(),
   });
-  const tplBtn = node("button", {
-    class: "tool", type: "button", text: "插入模板 ▾",
-    title: "插入常用正文模板", "aria-label": "插入模板",
-    "aria-haspopup": "true", "aria-expanded": "false",
-    onmousedown: (e) => e.preventDefault(),
-    onclick: (e) => { e.stopPropagation(); toggleTplMenu(e.currentTarget); },
-  });
-  const tplWrap = node("div", { class: "more-wrap tool-wrap" }, tplBtn, tplMenu);
-
-  const tools = buildTools(editor, markDirty, [attachBtn, tplWrap]);
+  const tools = buildTools(editor, markDirty, { attachBtn, tplMenu });
 
   // ---- 签名 ----------------------------------------------------------
   // 签名是**账号**设置，不是这一封的正文（拼信时才接在正文后面）。
@@ -254,6 +278,55 @@ function buildCompose(initialAccount) {
     "aria-label": "签名",
     onblur: saveSignature,
   });
+  // 签名名片（对齐网易：正文底部常驻 头像+名字+邮箱+签名）。点卡片就地编辑。
+  const sigAvatar = node("span", { class: "sig-avatar", "aria-hidden": "true", text: "?" });
+  const sigName = node("strong", { class: "sig-name", text: "" });
+  const sigMail = node("span", { class: "sig-mail", text: "" });
+  const sigText = node("div", { class: "sig-text", text: "" });
+  const sigLines = node("div", { class: "sig-lines" }, sigName, sigMail, sigText);
+  const sigCard = node("div", {
+    class: "compose-sigcard", role: "button", tabindex: "0",
+    title: "点击编辑签名",
+    onclick: enterSigEdit,
+    onkeydown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        enterSigEdit();
+      }
+    },
+  }, sigAvatar, sigLines);
+  function renderSigCard() {
+    const a = account;
+    sigAvatar.textContent = ((a && (a.name || a.email)) || "?").trim().charAt(0).toUpperCase();
+    sigName.textContent = (a && a.name) || "";
+    sigMail.textContent = (a && a.email) || "";
+    sigText.textContent = (sig.value || "").trim();
+    sigName.hidden = !sigName.textContent;
+  }
+  function enterSigEdit() {
+    clear(sigCard);
+    sigCard.classList.add("is-editing");
+    const doneBtn = node("button", {
+      class: "btn btn-primary", type: "button", text: "完成",
+      onclick: () => {
+        saveSignature();
+        exitSigEdit();
+      },
+    });
+    sigCard.append(
+      node("div", { class: "sig-lines" },
+        node("p", { class: "muted", text: "签名拼在正文最后（发信时自动带上）" }),
+        sig, doneBtn,
+      ),
+    );
+    sig.focus();
+  }
+  function exitSigEdit() {
+    sigCard.classList.remove("is-editing");
+    clear(sigCard);
+    sigCard.append(sigAvatar, sigLines);
+    renderSigCard();
+  }
 
   // ---- 顶栏（对齐网易邮箱大师：发送在左、发件人可切、自动保存时间戳在中，
   //      危险动作收右边）------------------------------------------------
@@ -267,6 +340,27 @@ function buildCompose(initialAccount) {
     class: "btn compose-del", type: "button", text: "删除草稿",
     onclick: remove,
   });
+  // ⋯ 更多：低频动作收起来，顶栏只留高频（对齐网易）
+  const moreMenu = node("div", { class: "more-menu", hidden: true, role: "menu" },
+    node("button", {
+      class: "more-item", type: "button", role: "menuitem", text: "立即保存草稿",
+      onclick: () => { closeAllComposeMenus(); flushSave(); },
+    }),
+    node("button", {
+      class: "more-item is-danger", type: "button", role: "menuitem", text: "删除草稿",
+      onclick: () => { closeAllComposeMenus(); remove(); },
+    }),
+  );
+  function toggleMoreMenu(btn) {
+    const open = moreMenu.hidden;
+    closeAllComposeMenus();
+    if (!open) return;
+    moreMenu.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+  }
+
+  // 发件人显示：有名字用「名 <邮>」，没名字只显邮箱（别摆一对空尖括号）
+  const fmtFrom = (a) => (a.name ? `${a.name} <${a.email}>` : a.email);
 
   // 发件人下拉：列出全部账号，点谁用谁发；签名跟着换
   const fromBtn = node("button", {
@@ -275,7 +369,7 @@ function buildCompose(initialAccount) {
     title: "选择发件账号",
     onclick: (e) => { e.stopPropagation(); toggleFromMenu(e.currentTarget); },
   },
-    node("span", { class: "from-text", text: account ? `${account.name || ""} <${account.email}>` : "选择发件账号" }),
+    node("span", { class: "from-text", text: account ? fmtFrom(account) : "选择发件账号" }),
     node("span", { class: "from-caret", "aria-hidden": "true", text: "▾" }),
   );
   const fromMenu = node("div", { class: "more-menu", hidden: true, role: "menu" });
@@ -297,8 +391,9 @@ function buildCompose(initialAccount) {
           text: `${a.name || ""} <${a.email}>`,
           onclick: () => {
             account = a;
-            fromBtn.querySelector(".from-text").textContent = `${a.name || ""} <${a.email}>`;
+            fromBtn.querySelector(".from-text").textContent = fmtFrom(a);
             if (sig.value !== (a.signature ?? "")) sig.value = a.signature ?? "";
+            renderSigCard();
             fromMenu.hidden = true;
             btn.setAttribute("aria-expanded", "false");
             markDirty();
@@ -312,6 +407,7 @@ function buildCompose(initialAccount) {
   function closeAllComposeMenus() {
     fromMenu.hidden = true;
     fromBtn.setAttribute("aria-expanded", "false");
+    moreMenu.hidden = true;
     tplMenu.hidden = true;
     document.querySelectorAll(".compose .more-wrap > button").forEach((b) => b.setAttribute("aria-expanded", "false"));
   }
@@ -323,7 +419,14 @@ function buildCompose(initialAccount) {
       node("div", { class: "more-wrap from-wrap" }, fromBtn, fromMenu),
       status,
       node("span", { class: "compose-head-gap", "aria-hidden": "true" }),
-      delBtn,
+      node("div", { class: "more-wrap" },
+        node("button", {
+          class: "btn compose-del", type: "button", text: "⋯",
+          title: "更多", "aria-label": "更多操作", "aria-haspopup": "true", "aria-expanded": "false",
+          onclick: (e) => { e.stopPropagation(); toggleMoreMenu(e.currentTarget); },
+        }),
+        moreMenu,
+      ),
       node("button", {
         class: "btn compose-close", type: "button", text: "×",
         title: "关闭（Esc）", "aria-label": "关闭写邮件",
@@ -331,14 +434,16 @@ function buildCompose(initialAccount) {
       }),
     ),
     node("div", { class: "compose-fields" },
-      to.el, cc.el, bcc.el, subjectRow,
+      node("div", { class: "compose-field" },
+        node("label", { class: "field-label", text: "收件人" }),
+        to.el.querySelector(".chips-wrap"),
+        node("div", { class: "field-toggles" }, ccToggle, bccToggle),
+      ),
+      cc.el, bcc.el, subjectRow,
     ),
     tools.el,
     editor,
-    node("details", { class: "compose-sig" },
-      node("summary", { text: "签名" }),
-      sig,
-    ),
+    sigCard,
     node("div", { class: "compose-atts" },
       attBox,
       filePicker,
@@ -360,6 +465,7 @@ function buildCompose(initialAccount) {
     clear(editor);
     renderAtts();
     if (account) sig.value = account.signature ?? "";
+    renderSigCard();
     to.focus();
     setStatus("");
   }
@@ -405,6 +511,7 @@ function buildCompose(initialAccount) {
     clear(editor);
     editor.append(buildQuote(mode, source));
     if (account) sig.value = account.signature ?? "";
+    renderSigCard();
     renderAtts();
     to.focus();
     setStatus("");
@@ -433,6 +540,7 @@ function buildCompose(initialAccount) {
         editor.textContent = d.text;
       }
       if (account) sig.value = account.signature ?? "";
+    renderSigCard();
       renderAtts();
       state.dirty = false;
       setStatus(`草稿 ${fmtTime(d.updated_at)}`);
@@ -591,7 +699,7 @@ function buildCompose(initialAccount) {
   function renderAtts() {
     const box = clear(attBox);
     if (state.attachments.length === 0) {
-      box.append(node("span", { class: "muted", text: "没有附件" }));
+      // 空态不写文案：整条附件区由 CSS :has 收起（对齐网易）
       return;
     }
     for (const a of state.attachments) {
@@ -737,7 +845,7 @@ function buildCompose(initialAccount) {
 
 // ================================================================= 工具条
 
-function buildTools(editor, onFormat, extras = []) {
+function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {}) {
   const run = (cmd, val = null) => {
     editor.focus();
     // 关键的一行：关掉 styleWithCSS，生成 `<font>` / `align` 而不是 `style=`。
@@ -843,10 +951,93 @@ function buildTools(editor, onFormat, extras = []) {
     },
   });
 
+  // 字体（execCommand fontName → <font face>，同样不走 style）
+  const fontSel = node("select", {
+    class: "tool", title: "字体", "aria-label": "字体",
+    onchange: (e) => {
+      if (e.target.value) run("fontName", e.target.value);
+      e.target.value = "";
+    },
+  },
+    node("option", { value: "", text: "字体" }),
+    node("option", { value: "宋体", text: "宋体" }),
+    node("option", { value: "黑体", text: "黑体" }),
+    node("option", { value: "楷体", text: "楷体" }),
+    node("option", { value: "微软雅黑", text: "微软雅黑" }),
+    node("option", { value: "Arial", text: "Arial" }),
+    node("option", { value: "Verdana", text: "Verdana" }),
+  );
+
+  // 下拉按钮（对齐网易的 ▾ 形态：把低频动作收进菜单，工具条一行放得下）
+  const dropdown = (text, title, items, extraClass = "") => {
+    const menu = node("div", { class: "more-menu", hidden: true, role: "menu" }, ...items);
+    const wrap = node("div", { class: `more-wrap tool-wrap${extraClass ? ` ${extraClass}` : ""}` });
+    const button = node("button", {
+      class: "tool", type: "button", text, title, "aria-label": title,
+      "aria-haspopup": "true", "aria-expanded": "false",
+      onmousedown: (e) => e.preventDefault(),
+      onclick: (e) => {
+        e.stopPropagation();
+        const open = menu.hidden;
+        document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
+        document.querySelectorAll(".compose .more-wrap > button").forEach((b) => b.setAttribute("aria-expanded", "false"));
+        if (!open) return;
+        menu.hidden = false;
+        button.setAttribute("aria-expanded", "true");
+      },
+    });
+    wrap.append(button, menu);
+    return wrap;
+  };
+  const menuItem = (text, title, fn) =>
+    node("button", {
+      class: "more-item", type: "button", role: "menuitem", text, title,
+      onclick: () => {
+        document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
+        fn();
+      },
+    });
+
+  // 「＋插入 ▾」：链接/图片/表格/常用模板（模板菜单挂同一位置展开）
+  const insertItems = [
+    menuItem("链接…", "插入链接", () => link.click()),
+    menuItem("图片…", "插入图片", () => imgBtn.click()),
+    menuItem("表格", "插入表格", () => tableBtn.click()),
+  ];
+  if (tplMenu) {
+    insertItems.push(
+      node("div", { class: "more-sep" }),
+      node("button", {
+        class: "more-item", type: "button", role: "menuitem", text: "常用模板 ▸",
+        title: "插入常用正文模板",
+        onclick: (e) => {
+          e.stopPropagation();
+          e.currentTarget.closest(".more-menu").hidden = true;
+          tplMenu.hidden = false;
+        },
+      }),
+    );
+  }
+  const insertDrop = dropdown("＋ 插入 ▾", "插入", insertItems);
+  if (tplMenu) insertDrop.append(tplMenu);
+
+  const alignDrop = dropdown("☰ 对齐 ▾", "对齐", [
+    menuItem("左对齐", "左对齐", () => run("justifyLeft")),
+    menuItem("居中", "居中", () => run("justifyCenter")),
+    menuItem("右对齐", "右对齐", () => run("justifyRight")),
+  ]);
+  const listDrop = dropdown("•≡ 列表 ▾", "列表", [
+    menuItem("• 无序列表", "无序列表", () => run("insertUnorderedList")),
+    menuItem("1. 有序列表", "有序列表", () => run("insertOrderedList")),
+    menuItem("❝ 引用", "引用", () => run("formatBlock", "<blockquote>")),
+  ]);
+
   const el = node("div", { class: "compose-tools", role: "toolbar", "aria-label": "格式" },
-    ...extras,
+    attachBtn,
+    insertDrop,
     node("span", { class: "tool-gap", "aria-hidden": "true" }),
     sizeSel,
+    fontSel,
     colorSel,
     hiSel,
     node("span", { class: "tool-gap", "aria-hidden": "true" }),
@@ -855,17 +1046,8 @@ function buildTools(editor, onFormat, extras = []) {
     btn("U", "下划线", "underline"),
     btn("S", "删除线", "strikeThrough"),
     node("span", { class: "tool-gap", "aria-hidden": "true" }),
-    btn("左", "左对齐", "justifyLeft"),
-    btn("中", "居中", "justifyCenter"),
-    btn("右", "右对齐", "justifyRight"),
-    node("span", { class: "tool-gap", "aria-hidden": "true" }),
-    btn("• 列表", "无序列表", "insertUnorderedList"),
-    btn("1. 列表", "有序列表", "insertOrderedList"),
-    btn("引用", "引用", "formatBlock", "<blockquote>"),
-    node("span", { class: "tool-gap", "aria-hidden": "true" }),
-    link,
-    imgBtn,
-    tableBtn,
+    alignDrop,
+    listDrop,
     node("span", { class: "tool-gap", "aria-hidden": "true" }),
     btn("↶", "撤销", "undo"),
     btn("↷", "重做", "redo"),
