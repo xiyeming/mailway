@@ -533,7 +533,12 @@ impl Store {
     pub fn list_events_in_range(&self, start: &str, end: &str) -> Result<Vec<Event>> {
         let conn = self.lock()?;
         let mut stmt =
-            conn.prepare("SELECT * FROM events WHERE end_at >= ?1 AND start_at < ?2 ORDER BY start_at")?;
+            conn.prepare(
+                "SELECT * FROM events
+                  WHERE (end_at >= ?1 AND start_at < ?2)
+                     OR (repeat_rule != 'none' AND start_at < ?2)
+                  ORDER BY start_at",
+            )?;
         let rows = stmt.query_map(params![start, end], row_to_event)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }

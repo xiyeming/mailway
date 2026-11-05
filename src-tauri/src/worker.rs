@@ -206,7 +206,27 @@ fn run_imap(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
             continue;
         }
 
+        // 不支持 IDLE 的服务器只能轮询 —— 不能反复试 IDLE（连接成功会把
+        // backoff 重置成 5 秒，就成了 5 秒一圈的空转，实测会把服务器问烦）。
+        let idle_ok = conn.supports_idle();
+        if !idle_ok {
+            tracing::info!(account = %account.email, "服务器不支持 IDLE，按收信频率轮询");
+        }
+
         loop {
+            if !idle_ok {
+                // 轮询模式：按收信频率（设置→邮件读写）探活 + 收一轮
+                thread::sleep(pop3_poll(&store));
+                if conn.noop().is_err() {
+                    tracing::warn!(account = %account.email, "连接断了，重连");
+                    break;
+                }
+                if let Err(e) = sync_inbox(&app, &store, account.id, &mut conn) {
+                    tracing::warn!(account = %account.email, "同步失败，重连: {}", e.user_message());
+                    break;
+                }
+                continue;
+            }
             match conn.idle_wait(idle_interval(&store)) {
                 Ok(true) => {
                     // 有变化：收新信 + 刷标志
@@ -288,30 +308,60 @@ fn report(app: &tauri::AppHandle, account_id: i64, outs: &[FolderSync]) {
     emit(app, account_id, fetched, broken, flags_changed, rebuilt);
     // 收到新信 → 桌面通知（M5，`org.freedesktop.Notifications`）。
     if fetched > 0 {
-        notify_new_mail(app, fetched);
+        notify_new_mail(app, account_id, fetched);
     }
 }
 
 /// 新信桌面通知。走 DBus（notify-rust），失败只记日志。
-/// 尊重设置：`notifications` = `off` 就不弹。
-fn notify_new_mail(app: &tauri::AppHandle, fetched: u32) {
+///
+/// 尊重设置（设置→邮件通知，全部键名与前端一致）：
+///   * `notify_popup` = off → 不弹；
+///   * `notify_show_sender` = on → 带上最新几封的「发件人 · 主题」；
+///   * `notify_sound` = on → 带提示音（`message-new-instant` 主题音）。
+fn notify_new_mail(app: &tauri::AppHandle, account_id: i64, fetched: u32) {
     use tauri::Manager;
-    let enabled = app
-        .state::<crate::commands::AppState>()
-        .store
-        .get_setting("notifications")
-        .ok()
-        .flatten();
-    if enabled.as_deref() == Some("off") {
+    let store = &app.state::<crate::commands::AppState>().store;
+    let setting = |key: &str, default_on: bool| -> bool {
+        match store.get_setting(key) {
+            Ok(Some(v)) => v != "off",
+            _ => default_on,
+        }
+    };
+
+    if !setting("notify_popup", true) {
         return;
     }
-    let body = format!("收到 {fetched} 封新邮件");
-    if let Err(e) = notify_rust::Notification::new()
-        .summary("Mailway")
-        .appname("mailway")
-        .body(&body)
-        .show()
-    {
+
+    let mut body = format!("收到 {fetched} 封新邮件");
+    if setting("notify_show_sender", true) {
+        // 最新几封的「发件人 · 主题」——收件箱最新在前
+        if let Some(inbox) = store
+            .list_folders(account_id)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|f| f.kind == mailway_core::types::FolderKind::Inbox)
+        {
+            if let Ok(msgs) = store.list_messages(inbox.id, 2, 0) {
+                for m in &msgs {
+                    let who = m
+                        .from
+                        .first()
+                        .map(|a| a.display.clone().unwrap_or_else(|| a.address.clone()))
+                        .unwrap_or_default();
+                    body.push_str(&format!("\n{} · {}", who, m.subject));
+                }
+            }
+        }
+    }
+
+    let mut note = notify_rust::Notification::new();
+    note.summary("Mailway").appname("mailway").body(&body);
+    if setting("notify_sound", true) {
+        note.hint(notify_rust::Hint::SoundName("message-new-instant".into()));
+    } else {
+        note.hint(notify_rust::Hint::SuppressSound(true));
+    }
+    if let Err(e) = note.show() {
         tracing::debug!("桌面通知失败: {e}");
     }
 }

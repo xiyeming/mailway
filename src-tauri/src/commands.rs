@@ -1125,6 +1125,112 @@ pub fn open_message(state: State<'_, AppState>, message_id: i64) -> Result<Opene
     })
 }
 
+/// 保存一个附件到本机「下载」目录，返回落盘路径。
+///
+/// 文件名**消毒**：只取 basename、去掉路径分隔符与控制字符（名字来自
+/// 不可信的邮件头）；重名自动加序号。
+#[tauri::command(rename_all = "snake_case")]
+pub fn save_attachment(
+    state: State<'_, AppState>,
+    message_id: i64,
+    attachment_id: String,
+) -> Result<String, String> {
+    let stored = state
+        .store
+        .get_message_raw(message_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这封邮件"))?;
+    let raw = match &stored.raw_path {
+        Some(p) => state.store.read_raw(p).map_err(e)?,
+        None => return Err("这封邮件没有原文，取不到附件".into()),
+    };
+    let parsed = mime::parse_message(&raw).map_err(e)?;
+    let att = parsed
+        .attachments
+        .iter()
+        .find(|a| a.meta.id == attachment_id)
+        .ok_or_else(|| not_found("这个附件"))?;
+
+    // 文件名消毒：不可信输入
+    let safe: String = att
+        .meta
+        .filename
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\')
+        .collect::<String>()
+        .trim()
+        .trim_start_matches('.')
+        .to_string();
+    let safe = if safe.is_empty() { "附件".to_string() } else { safe };
+
+    // 下载目录：$HOME/Downloads（没有就 $HOME）
+    let home = std::env::var("HOME").map_err(|_| "找不到家目录".to_string())?;
+    let dir = {
+        let d = std::path::PathBuf::from(&home).join("Downloads");
+        if d.is_dir() { d } else { std::path::PathBuf::from(&home) }
+    };
+
+    // 重名加序号： a.txt → a (1).txt
+    let mut path = dir.join(&safe);
+    if path.exists() {
+        let stem = std::path::Path::new(&safe)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "附件".into());
+        let ext = std::path::Path::new(&safe)
+            .extension()
+            .map(|s| format!(".{}", s.to_string_lossy()))
+            .unwrap_or_default();
+        for n in 1..1000 {
+            let candidate = dir.join(format!("{stem} ({n}){ext}"));
+            if !candidate.exists() {
+                path = candidate;
+                break;
+            }
+        }
+    }
+
+    std::fs::write(&path, &att.data).map_err(|err| format!("保存失败：{err}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+// ================================================================= 开机自启
+
+/// 开机自启：写/删 `~/.config/autostart/mailway.desktop`（XDG autostart）。
+/// 状态以系统文件为准 —— 不进 settings，免得两处不一致。
+fn autostart_desktop_path() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "找不到家目录".to_string())?;
+    Ok(std::path::PathBuf::from(home)
+        .join(".config")
+        .join("autostart")
+        .join("mailway.desktop"))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    let path = autostart_desktop_path()?;
+    if enabled {
+        let exe = std::env::current_exe().map_err(|err| format!("找不到可执行文件：{err}"))?;
+        let entry = format!(
+            "[Desktop Entry]\nType=Application\nName=Mailway\nComment=Mailway 邮件客户端\nExec={}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+            exe.display()
+        );
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|err| format!("创建目录失败：{err}"))?;
+        }
+        std::fs::write(&path, entry).map_err(|err| format!("写入自启文件失败：{err}"))?;
+    } else {
+        // 删不存在的文件也算成功 —— 目的达到了
+        let _ = std::fs::remove_file(&path);
+    }
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn autostart_status() -> bool {
+    autostart_desktop_path().map(|p| p.exists()).unwrap_or(false)
+}
+
 // ================================================================= 草稿
 
 /// 前端送进来的草稿。

@@ -466,6 +466,18 @@ impl Conn {
         }
     }
 
+    /// 服务器是否支持 IDLE（RFC 2177）？不支持的客户端只能轮询。
+    pub fn supports_idle(&mut self) -> bool {
+        let caps = match &mut self.session {
+            AnySession::Plain(s) => s.capabilities(),
+            AnySession::Tls(s) => s.capabilities(),
+        };
+        match caps {
+            Ok(caps) => caps.has_str("IDLE"),
+            Err(_) => false,
+        }
+    }
+
     /// NOOP 一次。`imap` crate 会丢掉 untagged 响应，所以这个只是保活/探活。
     pub fn noop(&mut self) -> Result<()> {
         match &mut self.session {

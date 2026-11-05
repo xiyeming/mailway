@@ -271,6 +271,12 @@ function renderShell() {
   renderStage();
 }
 
+/** 只重画左侧图标栏（设置里开关日历入口用，不动主区）。 */
+function refreshRail() {
+  const old = document.querySelector(".rail");
+  if (old) old.replaceWith(renderRail());
+}
+
 /** 左侧图标栏：邮件 / 联系人 / 日历（参考图 1 的图标栏）+ 底部主题开关。 */
 function renderRail() {
   return node(
@@ -278,7 +284,8 @@ function renderRail() {
     { class: "rail", "aria-label": "主导航" },
     railBtn("mail", "✉", "邮件"),
     railBtn("contacts", "👤", "联系人"),
-    railBtn("calendar", "📅", "日历"),
+    // 「启用日历」关掉就不出这个入口（设置→日历）
+    state.settings?.enable_calendar !== "off" ? railBtn("calendar", "📅", "日历") : null,
     themeBtn(),
     node("div", { class: "rail-spacer" }),
     railBtn("settings", "⚙", "设置"),
@@ -1642,12 +1649,27 @@ function renderActiveItem(d) {
                 { class: "attach" },
                 node("span", { class: "name", text: a.filename || "（未命名）" }),
                 node("span", { class: "meta", text: `${a.mime_type} · ${fmtSize(a.size)}` }),
+                node("button", {
+                  class: "btn attach-save", type: "button", text: "保存",
+                  title: "保存到本机「下载」目录",
+                  onclick: () => saveAttachment(d.summary.id, a.id),
+                }),
               ),
             ),
           )
         : null;
     })(),
   );
+}
+
+/** 保存附件到本机「下载」目录（文件名由后端消毒）。 */
+async function saveAttachment(messageId, attachmentId) {
+  try {
+    const path = await invoke("save_attachment", { message_id: messageId, attachment_id: attachmentId });
+    toast(`已保存到 ${path}`);
+  } catch (err) {
+    toast(`保存失败：${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /** 折叠的那封（会话里未展开）：头像 + 发件人 + 日期 + 摘要，点击展开。 */
@@ -2458,13 +2480,27 @@ function isoLocal(d) {
   return `${dayStr(d)}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 /** 月网格范围（含首尾补满的周日→周六）。 */
+/** ISO 周号（周一为一周之始的通用周数；周日开始的网格也用它，够用）。 */
+function isoWeekNumber(d) {
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  t.setDate(t.getDate() + 4 - (t.getDay() || 7)); // 到本周周四
+  const yearStart = new Date(t.getFullYear(), 0, 1);
+  return Math.ceil(((t - yearStart) / 86400000 + 1) / 7);
+}
+
+/** 一周开始日：设置 `cal_week_start`（默认周一）。返回 0=周日 / 1=周一。 */
+function weekStart() {
+  return state.settings?.cal_week_start === "sun" ? 0 : 1;
+}
+
 function calGridRange(y, m) {
+  const ws = weekStart();
   const first = new Date(y, m, 1);
   const start = new Date(first);
-  start.setDate(1 - first.getDay());
+  start.setDate(1 - ((first.getDay() - ws + 7) % 7));
   const last = new Date(y, m + 1, 0);
   const end = new Date(last);
-  end.setDate(last.getDate() + (6 - last.getDay()));
+  end.setDate(last.getDate() + (((ws + 6) % 7) - last.getDay() + 7) % 7);
   return { start, end };
 }
 
@@ -2478,7 +2514,9 @@ async function loadCalendar() {
   const { start, end } = calGridRange(state.calendar.year, state.calendar.month);
   const endIncl = new Date(end);
   endIncl.setDate(endIncl.getDate() + 1);
-  state.calendar.events = await invoke("list_events", { start: isoLocal(start), end: isoLocal(endIncl) });
+  const raw = await invoke("list_events", { start: isoLocal(start), end: isoLocal(endIncl) });
+  // 重复日程展开成区间内的实例（编辑/删除作用于整个系列 —— 实例沿用原 id）
+  state.calendar.events = expandRepeats(raw, start, endIncl);
   renderCalendar();
 }
 
@@ -2503,7 +2541,7 @@ function buildCalendar(stage) {
       ),
       node("div", { class: "cal-body" },
         node("div", { class: "cal-main" },
-          node("div", { class: "cal-weekdays" }, ["日", "一", "二", "三", "四", "五", "六"].map((w) => node("span", { class: "cal-wd", text: w }))),
+          node("div", { class: "cal-weekdays", id: "cal-weekdays" }),
           node("div", { class: "cal-days", id: "cal-days" }),
         ),
         node("aside", { class: "cal-side" },
@@ -2524,16 +2562,65 @@ function shiftMonth(delta) {
   loadCalendar();
 }
 
+/** 把 daily/weekly/monthly 展开成 [start,end) 内的实例；单次事件原样。
+ *  实例沿用原 id（点开改/删都作用于整个系列，v1 如此）。 */
+function expandRepeats(events, start, end) {
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  const out = [];
+  for (const e of events) {
+    const s0 = new Date(e.start);
+    const dur = Math.max(0, new Date(e.end) - s0);
+    const rep = e.repeat || "none";
+    if (rep === "none" || isNaN(s0)) {
+      out.push(e);
+      continue;
+    }
+    let cur = new Date(s0);
+    for (let guard = 0; guard < 500; guard++) {
+      const t = cur.getTime();
+      if (t >= endMs) break;
+      if (t >= startMs) {
+        out.push({ ...e, start: isoLocal(cur), end: isoLocal(new Date(t + dur)), is_repeat: true });
+      }
+      if (rep === "daily") cur.setDate(cur.getDate() + 1);
+      else if (rep === "weekly") cur.setDate(cur.getDate() + 7);
+      else if (rep === "monthly") cur.setMonth(cur.getMonth() + 1);
+      else break;
+    }
+  }
+  out.sort((a, b) => new Date(a.start) - new Date(b.start));
+  return out;
+}
+
 function renderCalendar() {
   const { year, month, events, selectedDay } = state.calendar;
   const title = document.getElementById("cal-title");
   if (title) title.textContent = `${year} 年 ${month + 1} 月`;
   const grid = document.getElementById("cal-days");
   if (!grid) return;
+  const ws = weekStart();
+  const showWeekNums = state.settings?.cal_week_numbers === "on";
+  grid.classList.toggle("has-weeknums", showWeekNums);
+
+  // 星期头也跟随「一周开始日」
+  const head = document.getElementById("cal-weekdays");
+  if (head) {
+    head.classList.toggle("has-weeknums", showWeekNums);
+    const wds = ["日", "一", "二", "三", "四", "五", "六"];
+    clear(head);
+    if (showWeekNums) head.append(node("span", { class: "cal-wd", text: "周" }));
+    head.append(...[...wds.slice(ws), ...wds.slice(0, ws)].map((w) => node("span", { class: "cal-wd", text: w })));
+  }
+
   clear(grid);
   const { start, end } = calGridRange(year, month);
   const todayStr = dayStr(new Date());
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    // 每行开头插周数（ISO 周号）
+    if (showWeekNums && d.getDay() === ws) {
+      grid.append(node("div", { class: "cal-weeknum", text: String(isoWeekNumber(d)) }));
+    }
     const ds = dayStr(d);
     const inMonth = d.getMonth() === month;
     const dayEvents = events.filter((e) => e.start.slice(0, 10) === ds);
@@ -2749,7 +2836,7 @@ function renderSettingsSection(content, id) {
   if (id === "system") {
     content.append(
       node("h2", { class: "settings-title", text: "系统设置" }),
-      settingRow("开机自动运行", "登录后自动启动 Mailway（需系统自启配置）", check("startup", "off")),
+      settingRow("开机自动运行", "登录系统后自动启动（XDG autostart）", autostartCheck()),
       settingRow("关闭主窗口时", "点窗口关闭按钮的行为", settingRadio(
         [["最小化到系统托盘", "on"], ["退出 Mailway", "off"]],
         val("close_to_tray", "on"),
@@ -2791,7 +2878,10 @@ function renderSettingsSection(content, id) {
   } else if (id === "calendar") {
     content.append(
       node("h2", { class: "settings-title", text: "日历" }),
-      settingRow("启用日历", "在日历模块里使用日程", check("enable_calendar", "on")),
+      settingRow("启用日历", "在左侧图标栏显示日历入口", settingCheck(
+        val("enable_calendar", "on") !== "off",
+        (on) => { set("enable_calendar", on ? "on" : "off"); refreshRail(); },
+      )),
       settingRow("默认提醒时间", "新建日程的默认提醒", settingSelect(
         [["none", "不提醒"], ["10m", "前 10 分钟"], ["30m", "前 30 分钟"], ["1h", "前 1 小时"], ["1d", "前 1 天"]],
         val("cal_remind", "10m"), (v) => set("cal_remind", v))),
@@ -2977,26 +3067,12 @@ async function setAccountEnabled(a, on) {
 
 /** 代理设置：类型 + 服务器/端口/账号密码（存起来，下次连接生效）。 */
 function renderProxySettings(content, s) {
-  const val = (k, d) => s[k] ?? d;
-  const set = (k, v) => saveSetting(k, v);
-  const type = val("proxy_type", "none");
   content.append(node("h2", { class: "settings-title", text: "代理设置" }));
+  // 诚实占位：收发连接还没接代理（TCP 直连），配了也不会生效——不开假开关。
+  // 真做排下个迭代：SOCKS5/HTTP CONNECT 接进 core 的 TcpStream 建连。
   content.append(
-    settingRow("代理类型", "收发邮件走的代理", settingRadio(
-      [["不使用代理", "none"], ["HTTP 代理", "http"], ["SOCKS4 代理", "socks4"], ["SOCKS5 代理", "socks5"]],
-      type, (v) => { set("proxy_type", v); renderSettings(); })),
+    settingRow("代理支持即将上线", "SOCKS5 / HTTP 代理接入收发连接开发中；现在配置不会生效，故暂不开放", null),
   );
-  if (type !== "none") {
-    content.append(
-      settingRow("服务器", "IP 或域名（必填）", settingField(val("proxy_server", ""), "IP 地址（必填）", (v) => set("proxy_server", v))),
-      settingRow("端口", "代理端口", settingField(val("proxy_port", "1080"), "1080", (v) => set("proxy_port", v))),
-      settingRow("用户名", "选填", settingField(val("proxy_user", ""), "选填", (v) => set("proxy_user", v))),
-      settingRow("密码", "选填", settingField(val("proxy_pass", ""), "选填", (v) => set("proxy_pass", v))),
-      node("div", { class: "contact-actions" },
-        node("button", { class: "btn btn-primary", type: "button", text: "启用", onclick: () => { set("proxy_enabled", "on"); statusNote("代理已启用（下次连接生效）"); } }),
-      ),
-    );
-  }
 }
 
 // ---- 设置控件 ----------------------------------------------------------
@@ -3041,6 +3117,24 @@ function settingField(value, ph, onChange) {
   const inp = node("input", { class: "form-input setting-field", type: "text", value: value || "", placeholder: ph || "" });
   inp.addEventListener("change", () => onChange(inp.value.trim()));
   return inp;
+}
+
+/** 开机自启开关（XDG autostart）—— 状态取自系统自启文件，不是 settings。 */
+function autostartCheck() {
+  const cb = node("input", { type: "checkbox", class: "switch-input" });
+  cb.addEventListener("change", async () => {
+    try {
+      await invoke("set_autostart", { enabled: cb.checked });
+      statusNote(cb.checked ? "已加入开机自启" : "已取消开机自启");
+    } catch (err) {
+      statusNote(`设置失败：${err instanceof Error ? err.message : err}`);
+      cb.checked = !cb.checked;
+    }
+  });
+  invoke("autostart_status")
+    .then((on) => { cb.checked = !!on; })
+    .catch(() => {});
+  return node("label", { class: "switch" }, cb, node("span", { class: "switch-ui", "aria-hidden": "true" }));
 }
 
 async function saveSetting(key, value) {

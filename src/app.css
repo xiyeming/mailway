@@ -3325,3 +3325,29 @@ button:focus-visible,
 .msg-raw-btn:hover {
   color: var(--accent);
 }
+
+
+/* 附件行「保存」按钮 */
+.attach-save {
+  margin-left: auto;
+  padding: 0.22rem 0.75rem;
+  font-size: 12px;
+}
+
+
+/* 月视图周数列（设置→日历→显示周数） */
+.cal-days.has-weeknums {
+  grid-template-columns: 2.2rem repeat(7, 1fr);
+}
+
+.cal-weekdays.has-weeknums {
+  grid-template-columns: 2.2rem repeat(7, 1fr);
+}
+
+.cal-weeknum {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
