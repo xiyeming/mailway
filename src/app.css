@@ -35,7 +35,33 @@
     "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  --radius: 6px;
+  /* ---- 统一设计令牌（UI 统一化）：圆角/字阶/间距/阴影。禁止裸数字。---- */
+  --r-sm: 4px;     /* 小件：色块/缩略图 */
+  --r-md: 8px;     /* 默认：按钮/输入框/菜单项 */
+  --r-lg: 12px;    /* 容器：菜单/对话框/卡片 */
+  --r-full: 999px; /* 胶囊：toggle/chip/徽标 */
+
+  --fs-xs: 11px;   /* 辅助：时间戳/计数/徽标 */
+  --fs-sm: 12px;   /* 次要：占位符/标签/菜单副文字 */
+  --fs-md: 13px;   /* 默认正文：列表/菜单/表单 */
+  --fs-lg: 15px;   /* 强调：主题/大输入框/卡片标题 */
+  --fs-xl: 18px;   /* 页面标题 */
+  --fs-2xl: 22px;  /* 阅读页主题 */
+  --fs-icon: 16px; /* 图标字形（caret/图标按钮） */
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  --sh-sm: 0 1px 3px rgb(15 23 42 / 8%);
+  --sh-md: 0 6px 20px rgb(15 23 42 / 12%);
+  --sh-lg: 0 18px 50px rgb(15 23 42 / 22%);
+  --sh-focus: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+
+  --radius: var(--r-md); /* 旧别名，逐步清空后删 */
 
   /* 统一标题栏/工具条基准（UI 矫正 B）：侧栏顶、列表头、阅读头、日历头、对话框头一条齐平 */
   --head-h: 2.75rem;
@@ -69,7 +95,7 @@
 /* 暗色下弹层阴影加深一点，浅色玻璃上不至于发灰。 */
 [data-theme="dark"] .more-menu,
 [data-theme="dark"] .suggest {
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--sh-lg);
 }
 
 /* 列表头像那几个彩色底在暗色下仍要看得清字。 */
@@ -104,7 +130,7 @@ body {
 
 body {
   font-family: var(--font);
-  font-size: 14px;
+  font-size: var(--fs-lg);
   line-height: 1.55;
   color: var(--fg);
   background: var(--bg);
@@ -175,7 +201,7 @@ body {
   width: 3.9rem;
   padding: 0.55rem 0.25rem;
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: none;
   color: var(--fg-muted);
   cursor: pointer;
@@ -198,7 +224,7 @@ body {
 }
 
 .rail-label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 600;
 }
 
@@ -206,11 +232,11 @@ body {
 .btn {
   padding: 0.35rem 0.85rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -240,12 +266,12 @@ body {
 
 .btn-mini {
   padding: 0.15rem 0.55rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .btn-icon {
   padding: 0.35rem 0.65rem;
-  font-size: 16px;
+  font-size: var(--fs-icon);
   line-height: 1;
 }
 
@@ -264,11 +290,11 @@ body {
 .form-input {
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .form-input:focus {
@@ -292,12 +318,12 @@ body {
   flex-shrink: 0;
   width: 3.25rem;
   color: var(--fg-faint);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .kv-v {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--fs-md);
   overflow-wrap: anywhere;
 }
 
@@ -352,7 +378,7 @@ body {
 }
 
 .contact-row-main .name {
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -360,7 +386,7 @@ body {
 }
 
 .contact-row-main .email {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -455,7 +481,7 @@ body {
 .cal-wd {
   padding: 0.45rem 0;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--fg-faint);
 }
@@ -504,7 +530,7 @@ body {
 }
 
 .cal-daynum {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   width: 1.55rem;
   height: 1.55rem;
@@ -521,9 +547,9 @@ body {
 }
 
 .cal-dot {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 0 0.3rem;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: var(--bg-active);
   color: var(--fg);
   white-space: nowrap;
@@ -537,7 +563,7 @@ body {
 }
 
 .cal-more {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--fg-faint);
 }
 
@@ -551,7 +577,7 @@ body {
 .cal-events-title {
   margin: 0;
   padding: 0.85rem 1.15rem 0.35rem;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--fg-muted);
 }
 
@@ -572,7 +598,7 @@ body {
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
 }
 
@@ -584,17 +610,17 @@ body {
 }
 
 .cal-event-title {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
 .cal-event-time {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
 }
 
 .cal-event-loc {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-faint);
 }
 
@@ -617,9 +643,9 @@ body {
   z-index: 30;
   margin-top: 2px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
-  box-shadow: 0 8px 24px rgba(28, 31, 38, 0.16);
+  box-shadow: var(--sh-md);
   overflow: hidden;
 }
 
@@ -646,12 +672,12 @@ body {
 }
 
 .sg-name {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
 .sg-email {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
 }
 
@@ -690,11 +716,11 @@ body {
   margin-left: auto;
   padding: 0.25rem 0.85rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   cursor: pointer;
 }
@@ -712,11 +738,11 @@ body {
 .btn-readall {
   padding: 0.25rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: var(--fg-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -742,17 +768,17 @@ body {
   min-width: 5rem;
   padding: 0.25rem 0.5rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 400;
 }
 
 .sync-status {
   font-weight: 400;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -787,11 +813,11 @@ body {
   height: var(--ctl-h);
   padding: 0 0.6rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -824,7 +850,7 @@ body {
   width: 100%;
   padding: 0.45rem 0.65rem;
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: none;
   font: inherit;
   color: inherit;
@@ -849,7 +875,7 @@ body {
 
 .account-row .email {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -867,7 +893,7 @@ body {
   width: 100%;
   padding: 0.45rem 0.65rem;
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: none;
   font: inherit;
   color: inherit;
@@ -887,7 +913,7 @@ body {
 .folder .count {
   margin-left: auto;
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -905,10 +931,10 @@ body {
 .btn-folder {
   padding: 0.25rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: inherit;
   cursor: pointer;
 }
@@ -942,14 +968,14 @@ body {
   min-width: 6rem;
   padding: 0.25rem 0.5rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .folder-status {
   flex-basis: 100%;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
 }
 
@@ -972,7 +998,7 @@ body {
 }
 
 .rules-title {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -988,7 +1014,7 @@ body {
 .rule-text {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -998,10 +1024,10 @@ body {
   flex: none;
   padding: 0.15rem 0.5rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: inherit;
   cursor: pointer;
 }
@@ -1051,7 +1077,7 @@ body {
 
 .rule-label {
   flex: none;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
@@ -1060,9 +1086,9 @@ body {
   max-width: 7rem;
   padding: 0.2rem 0.35rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   background: var(--bg);
   color: inherit;
 }
@@ -1076,7 +1102,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
@@ -1094,7 +1120,8 @@ body {
   width: 100%;
   padding: 0.65rem 1rem;
   border: none;
-  border-bottom: 1px solid var(--line);
+  /* 分隔线降到半透明：线只做「分」，不做「框」（去视觉分割） */
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
   background: none;
   font: inherit;
   color: inherit;
@@ -1150,7 +1177,7 @@ body {
 
 .row-l1 .from {
   color: var(--fg);
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1159,7 +1186,7 @@ body {
 /* 第二行：主题。 */
 .row .subject {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--fs-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1176,7 +1203,7 @@ body {
   flex: 1;
   min-width: 0;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1187,14 +1214,14 @@ body {
   align-items: center;
   gap: 0.35rem;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-faint);
 }
 
 .row-status .tag {
   color: var(--fg-muted);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   padding: 0 0.4rem;
   max-width: 5.5rem;
   overflow: hidden;
@@ -1213,7 +1240,7 @@ body {
 .row-l3 .date {
   flex-shrink: 0;
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -1225,7 +1252,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.6rem 0.75rem 0.25rem;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--fg-faint);
   letter-spacing: 0.02em;
@@ -1240,7 +1267,7 @@ body {
   border: none;
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -1265,10 +1292,10 @@ body {
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: none;
   color: var(--fg-muted);
-  font-size: 16px;
+  font-size: var(--fs-icon);
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
@@ -1294,7 +1321,7 @@ body {
 
 .side-icon {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 
 .side-name {
@@ -1309,7 +1336,7 @@ body {
   flex-shrink: 0;
   min-width: 1.15rem;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 650;
   color: var(--accent);
 }
@@ -1328,11 +1355,11 @@ body {
   background: none;
   color: var(--fg-muted);
   font: inherit;
-  font-size: 15px;
+  font-size: var(--fs-lg);
   line-height: 1;
   cursor: pointer;
   padding: 0 0.3rem;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
 }
 
 .sec-add:hover {
@@ -1358,7 +1385,7 @@ body {
 }
 
 .side-acct-name {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 650;
   color: var(--fg);
   white-space: nowrap;
@@ -1366,7 +1393,7 @@ body {
 }
 
 .side-acct-mail {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1387,7 +1414,7 @@ body {
   border-radius: 50%;
   background: var(--bg-active);
   color: #fff;
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
   font-weight: 600;
   line-height: 1;
   user-select: none;
@@ -1434,10 +1461,10 @@ body {
 .ra-btn {
   padding: 0.3rem 0.75rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: inherit;
   cursor: pointer;
   white-space: nowrap;
@@ -1483,9 +1510,9 @@ body {
   min-width: 11rem;
   padding: 0.25rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
-  box-shadow: 0 8px 24px rgba(28, 31, 38, 0.14);
+  box-shadow: var(--sh-md);
   display: flex;
   flex-direction: column;
 }
@@ -1515,7 +1542,7 @@ body {
 .swatch {
   width: 0.85rem;
   height: 0.85rem;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--line);
   flex-shrink: 0;
 }
@@ -1533,10 +1560,10 @@ body {
 .more-item {
   padding: 0.4rem 0.7rem;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -1581,11 +1608,11 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   color: var(--fg-muted);
-  font-size: 15px;
+  font-size: var(--fs-lg);
   background: var(--bg);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  box-shadow: var(--sh-sm);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -1606,11 +1633,11 @@ body {
 .btn-filter {
   padding: 0.15rem 0.4rem;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: none;
   color: var(--fg-muted);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   cursor: pointer;
 }
 
@@ -1654,17 +1681,17 @@ body {
 .msg-sender {
   color: var(--fg);
   font-weight: 650;
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 
 .msg-date {
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .msg-l2 {
   color: var(--fg-muted);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   margin-top: 0.15rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1684,7 +1711,7 @@ body {
   background: none;
   color: var(--accent);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -1694,7 +1721,7 @@ body {
 
 .msg-onbehalf {
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin: 0.25rem 0;
 }
 
@@ -1703,9 +1730,9 @@ body {
   padding: 0.6rem;
   background: var(--bg-sunken);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 12rem;
@@ -1722,7 +1749,7 @@ body {
 
 .thread-item {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   overflow: hidden;
 }
@@ -1765,7 +1792,7 @@ button.thread-item:hover {
 }
 
 .thread-item-top .from {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--fg);
   overflow: hidden;
@@ -1775,13 +1802,13 @@ button.thread-item:hover {
 
 .thread-item-top .date {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-faint);
   white-space: nowrap;
 }
 
 .thread-item-main .preview {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1791,7 +1818,7 @@ button.thread-item:hover {
 .thread-badge {
   flex-shrink: 0;
   color: var(--fg-faint);
-  font-size: 16px;
+  font-size: var(--fs-icon);
 }
 
 /* 展开的那封：完整正文 */
@@ -1804,11 +1831,11 @@ button.thread-item:hover {
   flex-shrink: 0;
   min-width: 1.2rem;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 650;
   color: var(--accent);
   background: var(--bg-active);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   padding: 0 0.4rem;
 }
 
@@ -1829,10 +1856,10 @@ button.thread-item:hover {
 .tool-toggle {
   padding: 0.25rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: inherit;
   cursor: pointer;
 }
@@ -1859,9 +1886,9 @@ button.thread-item:hover {
   gap: 0.15rem;
   padding: 0.1rem 0.25rem 0.1rem 0.55rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--bg-sunken);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .chip-x {
@@ -1871,7 +1898,7 @@ button.thread-item:hover {
   color: var(--fg-muted);
   cursor: pointer;
   padding: 0 0.3rem;
-  border-radius: 999px;
+  border-radius: var(--r-full);
 }
 
 .chip-x:hover {
@@ -1883,11 +1910,11 @@ button.thread-item:hover {
   width: 7rem;
   padding: 0.25rem 0.5rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .reader {
@@ -1917,7 +1944,7 @@ button.thread-item:hover {
   margin: 0 0 1rem;
   padding: 0 0 1rem;
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .mail-head dt {
@@ -1937,21 +1964,21 @@ button.thread-item:hover {
   margin: 0 0 1rem;
   padding: 0.6rem 0.9rem;
   border: 1px solid var(--warn-line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--warn-bg);
   color: var(--warn-fg);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .banner button {
   margin-left: auto;
   padding: 0.3rem 0.75rem;
   border: 1px solid var(--warn-line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: var(--warn-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -1986,7 +2013,7 @@ button.thread-item:hover {
 .mail-body pre,
 .mail-body code {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .mail-body blockquote {
@@ -2024,7 +2051,7 @@ button.thread-item:hover {
 
 .mail-attachments h2 {
   margin: 0 0 0.6rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--fg-faint);
   text-transform: uppercase;
@@ -2037,9 +2064,9 @@ button.thread-item:hover {
   gap: 0.6rem;
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   margin-bottom: 0.4rem;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .attach .name {
@@ -2049,14 +2076,14 @@ button.thread-item:hover {
 .attach .meta {
   margin-left: auto;
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   white-space: nowrap;
 }
 
 /* 详情折叠区 */
 .details {
   margin-top: 1.25rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .details summary {
@@ -2068,11 +2095,11 @@ button.thread-item:hover {
   margin: 0.5rem 0 0;
   padding: 0.75rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg-sunken);
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
 }
 
@@ -2089,7 +2116,7 @@ button:focus-visible,
   padding: 1rem;
   color: var(--danger);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   white-space: pre-wrap;
 }
 
@@ -2139,8 +2166,8 @@ button:focus-visible,
   min-height: 0;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 22%);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-lg);
   /* 写信窗也是弹窗，盖住一切内容（同 .scrim） */
   z-index: 2000;
   transform: translateZ(0);
@@ -2165,7 +2192,7 @@ button:focus-visible,
 }
 
 .compose-status {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-faint);
   white-space: nowrap;
 }
@@ -2200,10 +2227,10 @@ button:focus-visible,
   max-width: 17rem;
   padding: 0.35rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--fg);
   cursor: pointer;
 }
@@ -2220,7 +2247,7 @@ button:focus-visible,
 
 .from-caret {
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .compose-fields {
@@ -2246,7 +2273,7 @@ button:focus-visible,
 
 .field-label {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 /* 抄送/密送开关（收件人行右） */
@@ -2258,10 +2285,10 @@ button:focus-visible,
 .field-toggle {
   padding: 0.2rem 0.55rem;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
   cursor: pointer;
 }
@@ -2285,10 +2312,10 @@ button:focus-visible,
 .subject-chip {
   padding: 0.22rem 0.7rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
   cursor: pointer;
 }
@@ -2303,7 +2330,7 @@ button:focus-visible,
   border: 0;
   border-radius: 0;
   font: inherit;
-  font-size: 15px;
+  font-size: var(--fs-lg);
   color: inherit;
   background: none;
 }
@@ -2336,9 +2363,9 @@ button:focus-visible,
   align-items: center;
   gap: 0.3rem;
   padding: 0.15rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--bg-active);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 /* 地址不合法就标出来。不拦着保存 —— 打字打到一半本来就不是个地址，
@@ -2392,10 +2419,10 @@ button:focus-visible,
 .tool {
   padding: 0.26rem 0.5rem;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--fg);
   cursor: pointer;
 }
@@ -2439,7 +2466,7 @@ button:focus-visible,
   height: 1.35rem;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   cursor: pointer;
 }
 
@@ -2455,7 +2482,7 @@ button:focus-visible,
   justify-content: space-between;
   gap: 0.55rem;
   padding: 0.45rem 0.55rem;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--fg-muted);
 }
 
@@ -2464,7 +2491,7 @@ button:focus-visible,
   height: 1.75rem;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   background: none;
   cursor: pointer;
 }
@@ -2538,7 +2565,7 @@ button:focus-visible,
   margin: 0.75rem 1.15rem 1.15rem;
   padding: 0.65rem 0.75rem;
   border: 1px dashed transparent;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
 }
@@ -2564,7 +2591,7 @@ button:focus-visible,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--accent);
   color: var(--bg);
   font-size: 1.05rem;
@@ -2578,16 +2605,16 @@ button:focus-visible,
 }
 
 .sig-name {
-  font-size: 14px;
+  font-size: var(--fs-lg);
 }
 
 .sig-mail {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-faint);
 }
 
 .sig-text {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
   white-space: pre-wrap;
 }
@@ -2605,9 +2632,9 @@ button:focus-visible,
   margin-top: 0.5rem;
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: inherit;
   background: var(--bg);
   resize: vertical;
@@ -2634,7 +2661,7 @@ button:focus-visible,
 }
 
 .att .att-size {
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .compose-foot {
@@ -2656,10 +2683,10 @@ button:focus-visible,
 .btn {
   padding: 0.42rem 0.95rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--fg);
   cursor: pointer;
 }
@@ -2738,8 +2765,8 @@ button:focus-visible,
   overflow-y: auto;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: 0 18px 50px rgb(15 23 42 / 26%);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-lg);
 }
 
 /* 窄对话框（新建/重命名文件夹这类单输入的）：别铺太开 */
@@ -2777,13 +2804,13 @@ button:focus-visible,
   padding: 0.85rem 1.15rem;
   border-top: 1px solid var(--line);
   background: var(--bg-sunken);
-  border-radius: 0 0 14px 14px;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
 }
 
 .dialog-status {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-faint);
   line-height: 1.5;
 }
@@ -2803,15 +2830,15 @@ button:focus-visible,
   width: 100%;
   height: 2.55rem;
   padding: 0 0.95rem;
-  font-size: 0.95rem;
-  border-radius: 10px;
+  font-size: var(--fs-lg);
+  border-radius: var(--r-md);
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .dialog-body .input:focus-visible,
 .dialog-body .form-input:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: var(--sh-focus);
 }
 
 /* ---- 表单 ---- */
@@ -2835,16 +2862,16 @@ button:focus-visible,
 
 .form-label {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .form-input {
   width: 100%;
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-lg);
   color: inherit;
   background: var(--bg);
 }
@@ -2862,13 +2889,13 @@ button:focus-visible,
   margin: 0;
   padding: 0.75rem 0.9rem 0.9rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
 }
 
 .form-legend {
   padding: 0 0.35rem;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -2876,7 +2903,7 @@ button:focus-visible,
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem 1rem;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .form-radios label {
@@ -2889,7 +2916,7 @@ button:focus-visible,
 .form-hint {
   margin: 0;
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* 添加账号：供应商速选 + 收信协议切换 */
@@ -2903,10 +2930,10 @@ button:focus-visible,
 .acc-chip {
   padding: 0.3rem 0.75rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--bg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: inherit;
   cursor: pointer;
 }
@@ -2918,10 +2945,10 @@ button:focus-visible,
 .proto-btn {
   padding: 0.3rem 0.9rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: inherit;
   cursor: pointer;
 }
@@ -2937,10 +2964,10 @@ button:focus-visible,
   margin-top: 0.35rem;
   padding: 0.25rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: inherit;
   cursor: pointer;
 }
@@ -3032,7 +3059,7 @@ button:focus-visible,
 
 .tpl-row.is-sel {
   background: var(--bg-active);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
 }
 
 .tpl-pick {
@@ -3054,7 +3081,7 @@ button:focus-visible,
 }
 
 .tpl-name {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3062,7 +3089,7 @@ button:focus-visible,
 }
 
 .tpl-subj {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3111,11 +3138,11 @@ button:focus-visible,
 .settings-nav-item {
   padding: 0.45rem 0.75rem;
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: none;
   color: var(--fg-muted);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   text-align: left;
   cursor: pointer;
 }
@@ -3146,7 +3173,7 @@ button:focus-visible,
 
 .settings-sub {
   margin: 1.15rem 0 0.25rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--fg-faint);
 }
@@ -3161,7 +3188,7 @@ button:focus-visible,
 
 .settings-sec {
   margin: 1.5rem 0 0.35rem;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   color: var(--fg-faint);
   text-transform: uppercase;
@@ -3194,12 +3221,12 @@ button:focus-visible,
 }
 
 .setting-label {
-  font-size: 14px;
+  font-size: var(--fs-lg);
   font-weight: 600;
 }
 
 .setting-desc {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
 }
 
@@ -3207,7 +3234,7 @@ button:focus-visible,
 .seg {
   display: inline-flex;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -3218,7 +3245,7 @@ button:focus-visible,
   background: var(--bg);
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -3255,7 +3282,7 @@ button:focus-visible,
 .switch-ui {
   width: 2.55rem;
   height: 1.45rem;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--bg-active);
   border: 1px solid var(--line);
   position: relative;
@@ -3321,7 +3348,7 @@ button:focus-visible,
   gap: 0.1rem;
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg);
   text-align: left;
   cursor: pointer;
@@ -3340,7 +3367,7 @@ button:focus-visible,
 }
 
 .mailbox-name {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3348,7 +3375,7 @@ button:focus-visible,
 }
 
 .mailbox-mail {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3378,7 +3405,7 @@ button:focus-visible,
   background: none;
   color: var(--fg-muted);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   cursor: pointer;
 }
 
@@ -3436,10 +3463,10 @@ button:focus-visible,
   background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   padding: 0.55rem 0.95rem;
-  font-size: 13px;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 16%);
+  font-size: var(--fs-md);
+  box-shadow: var(--sh-md);
   opacity: 1;
   transform: translateY(0);
   transition: opacity 0.28s ease, transform 0.28s ease;
@@ -3459,7 +3486,7 @@ button:focus-visible,
   background: none;
   color: var(--accent);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -3494,7 +3521,7 @@ button:focus-visible,
 .proto-line .port-tag {
   flex-shrink: 0;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .proto-line .port-input {
@@ -3514,7 +3541,7 @@ button:focus-visible,
 
 .acc-dialog .acc-chip {
   padding: 0.34rem 0.4rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   text-align: center;
 }
 
@@ -3529,7 +3556,7 @@ button:focus-visible,
 
 .acc-dialog .form-label {
   padding-top: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--fg-muted);
 }
 
@@ -3570,7 +3597,7 @@ button:focus-visible,
   border-top: 1px solid var(--line);
   border-radius: 0;
   color: var(--fg-muted);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 
 .acc-dialog .adv-toggle:hover {
@@ -3584,7 +3611,7 @@ button:focus-visible,
 }
 
 .acc-dialog .adv-arrow {
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* 高级区的 fieldset 去掉重框，只留小标题（更轻） */
@@ -3597,7 +3624,7 @@ button:focus-visible,
 .acc-dialog .form-legend {
   padding: 0 0 0.45rem;
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -3624,7 +3651,7 @@ button:focus-visible,
   margin-top: 0.55rem;
   padding: 0.7rem 0.85rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--bg-sunken);
   display: flex;
   flex-direction: column;
@@ -3644,18 +3671,18 @@ button:focus-visible,
 
 .msg-dlabel {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   white-space: nowrap;
 }
 
 .msg-dvalue {
-  font-size: 13px;
+  font-size: var(--fs-md);
   overflow-wrap: anywhere;
 }
 
 .msg-dvalue.is-mono {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--fg-muted);
 }
 
@@ -3667,7 +3694,7 @@ button:focus-visible,
   background: none;
   color: var(--fg-faint);
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
@@ -3680,7 +3707,7 @@ button:focus-visible,
 .attach-save {
   margin-left: auto;
   padding: 0.22rem 0.75rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 
@@ -3698,7 +3725,7 @@ button:focus-visible,
   align-items: center;
   justify-content: center;
   color: var(--fg-faint);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 
@@ -3719,7 +3746,7 @@ button:focus-visible,
 
 .select-bar .sel-count {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   min-width: 4.5rem;
 }
 
@@ -3731,7 +3758,7 @@ button:focus-visible,
 
 .select-bar .btn {
   padding: 0.28rem 0.7rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .row-pick {
@@ -3739,11 +3766,11 @@ button:focus-visible,
   width: 1.15rem;
   height: 1.15rem;
   border: 1.5px solid var(--fg-faint);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--accent);
   background: var(--bg);
 }
@@ -3775,10 +3802,10 @@ select.form-input {
   height: 2.55rem;
   padding: 0 0.95rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
   color: inherit;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -3790,10 +3817,10 @@ textarea.folder-input {
   height: auto;
   padding: 0.55rem 0.95rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
   color: inherit;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -3812,7 +3839,7 @@ select.form-input:focus-visible,
 textarea.form-input:focus-visible,
 textarea.folder-input:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: var(--sh-focus);
   outline: none;
 }
 
@@ -3821,14 +3848,14 @@ textarea.folder-input:focus-visible {
   min-height: 2.55rem;
   padding: 0.35rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--bg);
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .chips:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: var(--sh-focus);
 }
 
 
@@ -3844,7 +3871,7 @@ textarea.folder-input:focus-visible {
   position: relative;
   width: 100%;
   height: 9.5rem;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   cursor: crosshair;
   touch-action: none;
 }
@@ -3855,7 +3882,7 @@ textarea.folder-input:focus-visible {
   height: 12px;
   margin: -6px 0 0 -6px;
   border: 2px solid #fff;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
   pointer-events: none;
 }
@@ -3864,7 +3891,7 @@ textarea.folder-input:focus-visible {
   position: relative;
   width: 100%;
   height: 0.95rem;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   cursor: pointer;
   touch-action: none;
   background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
@@ -3877,7 +3904,7 @@ textarea.folder-input:focus-visible {
   height: 14px;
   margin: -7px 0 0 -7px;
   border: 2px solid #fff;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
   pointer-events: none;
 }
@@ -3892,7 +3919,7 @@ textarea.folder-input:focus-visible {
   width: 2.2rem;
   height: 2.2rem;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   flex-shrink: 0;
 }
 
@@ -3908,4 +3935,230 @@ textarea.folder-input:focus-visible {
   display: flex;
   justify-content: flex-end;
   gap: 0.45rem;
+}
+
+
+/* ================================================================ UI 统一化 P3-P5
+   控件高度三档 / 交互反馈公约 / 微按钮收编。
+   原则：hover 只变底色（不跳尺寸不动边框）、focus 一律 --sh-focus 光环、
+   disabled 统一降透明、过渡 120ms。旧类保留名字免得动 JS，规格收到一套上。 */
+
+/* ---- P3 控件高度 ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.btn-lg {
+  height: 2.55rem;
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-lg);
+}
+
+.btn-sm,
+.tool,
+.field-toggle,
+.subject-chip,
+.btn-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  height: 1.65rem;
+  padding: 0 var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.btn-icon,
+.sec-add,
+.acct-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-icon);
+  line-height: 1;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+/* ---- P4 交互公约 ---- */
+.btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--line);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 650;
+}
+
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 86%, #000);
+  border-color: color-mix(in srgb, var(--accent) 86%, #000);
+}
+
+.btn-danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  border-color: var(--danger);
+}
+
+.btn-ghost:hover,
+.btn-sm:hover,
+.tool:hover,
+.field-toggle:hover,
+.subject-chip:hover,
+.btn-filter:hover,
+.btn-icon:hover,
+.sec-add:hover,
+.acct-more:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/* focus 光环：所有可交互件一个样（:where 低权重，组件可覆盖） */
+:where(a, button, input, select, textarea, [tabindex], summary):focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+}
+
+:where(button, input, select, textarea):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- P5 微按钮收编（行内动作件统一小档） ---- */
+.row-quick,
+.side-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-full);
+  background: none;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.row-quick:hover,
+.side-caret:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+
+/* 特殊按钮的尺寸个性（写在统一块后，盖过 .btn 默认档） */
+.compose-send {
+  height: 2.25rem;
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-lg);
+}
+
+.compose-close,
+.compose-del {
+  height: var(--ctl-h);
+  min-width: var(--ctl-h);
+  padding: 0 var(--sp-2);
+}
+
+.compose-close {
+  font-size: var(--fs-icon);
+}
+
+
+/* ================================================================ UI 统一化 P6-P8
+   自绘选择框 / 菜单选中态 / 空态与 toast 归档 */
+
+/* ---- P6 自绘选择框（形态 = 输入框 + ▾） ---- */
+.custom-select-wrap {
+  width: 100%;
+}
+
+.custom-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.custom-select .cs-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select .cs-caret {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  font-size: var(--fs-xs);
+}
+
+.more-item.is-selected {
+  background: var(--bg-hover);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.more-item.is-selected::after {
+  content: "✓";
+  margin-left: auto;
+  padding-left: var(--sp-2);
+}
+
+/* ---- P8 空态 / toast 归档 ---- */
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) var(--sp-4);
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+.toast {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-md);
+  font-size: var(--fs-md);
 }

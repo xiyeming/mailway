@@ -3317,11 +3317,9 @@ function renderEventForm(box, title) {
     return node("div", { class: "form-field" }, node("label", { class: "field-label", text: label, for: `ev-${key}` }), input);
   };
   const sel = (key, label, val, opts) => {
-    const select = node("select", { class: "form-input", id: `ev-${key}` },
-      opts.map(([v, t]) => node("option", { value: v, text: t, ...(v === val ? { selected: "selected" } : {}) })),
-    );
-    fields[key] = select;
-    return node("div", { class: "form-field" }, node("label", { class: "field-label", text: label, for: `ev-${key}` }), select);
+    const cs = customSelect(opts, val, () => {});
+    fields[key] = cs; // 读 fields[key].value，同原生
+    return node("div", { class: "form-field" }, node("label", { class: "field-label", text: label }), cs.el);
   };
   const allDay = node("input", { type: "checkbox", id: "ev-allday" });
   allDay.checked = !!e.all_day;
@@ -3738,11 +3736,72 @@ function settingRadio(options, current, onChange) {
   return seg;
 }
 
+/**
+ * 自绘选择框（P6）。原生 <select> 的弹层是平台画的，不跟主题——一律不用。
+ * 形态 = 输入框 + ▾，菜单同 .more-menu；返回 { el, value } 兼容旧读法。
+ */
+function customSelect(options, current, onChange) {
+  let cur = current ?? (options[0] ? options[0][0] : "");
+  const label = node("span", { class: "cs-label" });
+  const caret = node("span", { class: "cs-caret", "aria-hidden": "true", text: "▾" });
+  const menu = node("div", { class: "more-menu", hidden: true, role: "listbox" });
+  const wrap = node("div", { class: "more-wrap custom-select-wrap" });
+  const btn = node("button", {
+    class: "form-input custom-select", type: "button",
+    "aria-haspopup": "listbox", "aria-expanded": "false",
+    onclick: (e) => {
+      e.stopPropagation();
+      const open = menu.hidden;
+      closeAllMenus();
+      if (!open) return;
+      renderMenu();
+      menu.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+      requestAnimationFrame(flipMenuOverflow);
+    },
+  }, label, caret);
+  function renderMenu() {
+    clear(menu);
+    for (const [v, t] of options) {
+      menu.append(
+        node("button", {
+          class: v === cur ? "more-item is-selected" : "more-item",
+          type: "button", role: "option", "aria-selected": String(v === cur),
+          text: t,
+          onclick: () => {
+            setValue(v);
+            menu.hidden = true;
+            btn.setAttribute("aria-expanded", "false");
+            btn.focus();
+          },
+        }),
+      );
+    }
+  }
+  function setValue(v, notify = true) {
+    cur = v;
+    const found = options.find(([ov]) => ov === v);
+    label.textContent = found ? found[1] : String(v);
+    if (!notify) return;
+    btn.dispatchEvent(new Event("change"));
+    if (onChange) onChange(cur);
+  }
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  wrap.append(btn, menu);
+  setValue(cur, false); // 初装不通知 —— 不然 settingSelect 一渲染就写设置
+  return {
+    el: wrap,
+    get value() {
+      return cur;
+    },
+    set value(v) {
+      setValue(v);
+    },
+  };
+}
+
 function settingSelect(options, current, onChange) {
-  const sel = node("select", { class: "form-input setting-select" },
-    options.map(([v, t]) => node("option", { value: v, text: t, ...(v === current ? { selected: "selected" } : {}) })));
-  sel.addEventListener("change", () => onChange(sel.value));
-  return sel;
+  return customSelect(options, current, onChange).el;
 }
 
 function settingField(value, ph, onChange) {
