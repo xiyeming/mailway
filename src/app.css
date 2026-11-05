@@ -1501,6 +1501,31 @@ body {
   transform: translateZ(0);
 }
 
+/* 颜色/高亮菜单的色块（自绘下拉用；不吃主题也不刺眼——小色点） */
+.more-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.sw-red { background: #b42318; }
+.sw-orange { background: #b54708; }
+.sw-green { background: #067647; }
+.sw-blue { background: #2f6feb; }
+.sw-purple { background: #6941c6; }
+.sw-black { background: #1c1f26; }
+.sw-gray { background: #6b7280; }
+.sw-yellow { background: #fef08a; }
+.sw-pink { background: #fbcfe8; }
+
 .more-item {
   padding: 0.4rem 0.7rem;
   border: none;
@@ -2104,7 +2129,7 @@ button:focus-visible,
 
 .compose {
   position: fixed;
-  inset: 4vh 5vw;
+  inset: 7vh 5vw 4vh;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2121,8 +2146,8 @@ button:focus-visible,
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  min-height: var(--head-h);
-  padding: 0 0.85rem;
+  min-height: 3.35rem;
+  padding: 0 1.15rem;
   border-bottom: 1px solid var(--line);
 }
 

@@ -863,50 +863,6 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
       onclick: () => run(cmd, val),
     });
 
-  // 字号按邮件习惯标 px（execCommand 只认 1-7 档，映射过去）
-  const sizeSel = node("select", {
-    class: "tool", title: "字号", "aria-label": "字号",
-    onchange: (e) => run("fontSize", e.target.value),
-  },
-    node("option", { value: "3", text: "14px" }),
-    node("option", { value: "2", text: "12px" }),
-    node("option", { value: "4", text: "16px" }),
-    node("option", { value: "5", text: "18px" }),
-    node("option", { value: "6", text: "24px" }),
-  );
-
-  const colorSel = node("select", {
-    class: "tool is-color", title: "文字颜色", "aria-label": "文字颜色",
-    onchange: (e) => {
-      if (e.target.value) run("foreColor", e.target.value);
-      e.target.value = "";
-    },
-  },
-    node("option", { value: "", text: "A 颜色" }),
-    node("option", { value: "#b42318", text: "红" }),
-    node("option", { value: "#b54708", text: "橙" }),
-    node("option", { value: "#067647", text: "绿" }),
-    node("option", { value: "#2f6feb", text: "蓝" }),
-    node("option", { value: "#6941c6", text: "紫" }),
-    node("option", { value: "#1c1f26", text: "黑" }),
-    node("option", { value: "#6b7280", text: "灰" }),
-  );
-
-  const hiSel = node("select", {
-    class: "tool is-color", title: "高亮颜色", "aria-label": "高亮颜色",
-    onchange: (e) => {
-      if (e.target.value) run("backColor", e.target.value);
-      e.target.value = "";
-    },
-  },
-    node("option", { value: "", text: "🖊 高亮" }),
-    node("option", { value: "#fef08a", text: "黄" }),
-    node("option", { value: "#bbf7d0", text: "绿" }),
-    node("option", { value: "#bfdbfe", text: "蓝" }),
-    node("option", { value: "#fbcfe8", text: "粉" }),
-    node("option", { value: "#e5e7eb", text: "灰" }),
-  );
-
   // 链接不再用 window.prompt（WebKitGTK 弹窗抢焦点，全项目禁用）——
   // 同款小对话框输入地址，选中文字当链接文字。
   const link = node("button", {
@@ -951,23 +907,6 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
     },
   });
 
-  // 字体（execCommand fontName → <font face>，同样不走 style）
-  const fontSel = node("select", {
-    class: "tool", title: "字体", "aria-label": "字体",
-    onchange: (e) => {
-      if (e.target.value) run("fontName", e.target.value);
-      e.target.value = "";
-    },
-  },
-    node("option", { value: "", text: "字体" }),
-    node("option", { value: "宋体", text: "宋体" }),
-    node("option", { value: "黑体", text: "黑体" }),
-    node("option", { value: "楷体", text: "楷体" }),
-    node("option", { value: "微软雅黑", text: "微软雅黑" }),
-    node("option", { value: "Arial", text: "Arial" }),
-    node("option", { value: "Verdana", text: "Verdana" }),
-  );
-
   // 下拉按钮（对齐网易的 ▾ 形态：把低频动作收进菜单，工具条一行放得下）
   const dropdown = (text, title, items, extraClass = "") => {
     const menu = node("div", { class: "more-menu", hidden: true, role: "menu" }, ...items);
@@ -997,6 +936,52 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
         fn();
       },
     });
+  // 带色块的菜单项（颜色/高亮用；色块走 CSS class，不写内联 style）
+  const swatchItem = (text, title, cls, fn) =>
+    node("button", {
+      class: "more-item", type: "button", role: "menuitem", title,
+      onclick: () => {
+        document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
+        fn();
+      },
+    },
+      node("span", { class: `swatch ${cls}`, "aria-hidden": "true" }),
+      node("span", { text }),
+    );
+
+  // 字号 / 字体 / 颜色 / 高亮 —— 全部自绘下拉。
+  // 原生 <select> 的弹层是平台画的，theme 变量管不到（WebKitGTK 深色弹层）。
+  const sizeDrop = dropdown("14px ▾", "字号", [
+    menuItem("12px", "小", () => run("fontSize", "2")),
+    menuItem("14px", "正常", () => run("fontSize", "3")),
+    menuItem("16px", "偏大", () => run("fontSize", "4")),
+    menuItem("18px", "大", () => run("fontSize", "5")),
+    menuItem("24px", "很大", () => run("fontSize", "6")),
+  ]);
+  const fontDrop = dropdown("字体 ▾", "字体", [
+    menuItem("宋体", "宋体", () => run("fontName", "宋体")),
+    menuItem("黑体", "黑体", () => run("fontName", "黑体")),
+    menuItem("楷体", "楷体", () => run("fontName", "楷体")),
+    menuItem("微软雅黑", "微软雅黑", () => run("fontName", "微软雅黑")),
+    menuItem("Arial", "Arial", () => run("fontName", "Arial")),
+    menuItem("Verdana", "Verdana", () => run("fontName", "Verdana")),
+  ]);
+  const colorDrop = dropdown("A 颜色 ▾", "文字颜色", [
+    swatchItem("红", "红色", "sw-red", () => run("foreColor", "#b42318")),
+    swatchItem("橙", "橙色", "sw-orange", () => run("foreColor", "#b54708")),
+    swatchItem("绿", "绿色", "sw-green", () => run("foreColor", "#067647")),
+    swatchItem("蓝", "蓝色", "sw-blue", () => run("foreColor", "#2f6feb")),
+    swatchItem("紫", "紫色", "sw-purple", () => run("foreColor", "#6941c6")),
+    swatchItem("黑", "黑色", "sw-black", () => run("foreColor", "#1c1f26")),
+    swatchItem("灰", "灰色", "sw-gray", () => run("foreColor", "#6b7280")),
+  ]);
+  const hiDrop = dropdown("🖊 高亮 ▾", "高亮颜色", [
+    swatchItem("黄", "黄色", "sw-yellow", () => run("backColor", "#fef08a")),
+    swatchItem("绿", "绿色", "sw-green", () => run("backColor", "#bbf7d0")),
+    swatchItem("蓝", "蓝色", "sw-blue", () => run("backColor", "#bfdbfe")),
+    swatchItem("粉", "粉色", "sw-pink", () => run("backColor", "#fbcfe8")),
+    swatchItem("灰", "灰色", "sw-gray", () => run("backColor", "#e5e7eb")),
+  ]);
 
   // 「＋插入 ▾」：链接/图片/表格/常用模板（模板菜单挂同一位置展开）
   const insertItems = [
@@ -1036,10 +1021,10 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
     attachBtn,
     insertDrop,
     node("span", { class: "tool-gap", "aria-hidden": "true" }),
-    sizeSel,
-    fontSel,
-    colorSel,
-    hiSel,
+    sizeDrop,
+    fontDrop,
+    colorDrop,
+    hiDrop,
     node("span", { class: "tool-gap", "aria-hidden": "true" }),
     btn("B", "粗体", "bold"),
     btn("I", "斜体", "italic"),
