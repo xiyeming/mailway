@@ -4053,7 +4053,9 @@ textarea.folder-input:focus-visible {
 }
 
 /* focus 光环：所有可交互件一个样（:where 低权重，组件可覆盖） */
-:where(a, button, input, select, textarea, [tabindex], summary):focus-visible {
+/* chip-input 除外：它住在 chips 盒子里，光环画在**外壳**上（:focus-within），
+   里外各来一圈就是「重影」 */
+:where(a, button, input:not(.chip-input), select, textarea, [tabindex], summary):focus-visible {
   outline: none;
   box-shadow: var(--sh-focus);
 }
