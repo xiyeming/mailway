@@ -1015,6 +1015,290 @@ fn delete_message_remote(store: &Store, pool: &ConnPool<Conn>, folder_id: i64, u
     })
 }
 
+// ================================================================= 多选批量
+
+/// 批量改标志（多选：标为已读/未读、标星）。`seen`/`flagged` 传 `None` 就不动。
+/// 本地先改（界面立刻变），服务器按文件夹分组、按增量批量 `UID STORE`。
+#[tauri::command(rename_all = "snake_case")]
+pub fn batch_set_flags(
+    state: State<'_, AppState>,
+    message_ids: Vec<i64>,
+    seen: Option<bool>,
+    flagged: Option<bool>,
+) -> Result<u32, String> {
+    if message_ids.is_empty() || (seen.is_none() && flagged.is_none()) {
+        return Ok(0);
+    }
+    let mut changes = Vec::new();
+    for id in &message_ids {
+        let Ok(Some(stored)) = state.store.get_message_raw(*id) else { continue };
+        let old = stored.summary.flags.clone();
+        let mut new = old.clone();
+        if let Some(v) = seen { new.seen = v; }
+        if let Some(v) = flagged { new.flagged = v; }
+        if new == old { continue; }
+        state.store.set_message_flags(*id, &new).map_err(e)?;
+        changes.push((stored.summary.folder_id, stored.summary.uid, old, new));
+    }
+    let n = changes.len() as u32;
+    push_flags_batch_in_background(&state, changes);
+    Ok(n)
+}
+
+/// 标志批量推服务器：按箱分组、按增量分组（seen±/flagged± 最多四条命令）。
+fn push_flags_batch_in_background(
+    state: &State<'_, AppState>,
+    changes: Vec<(i64, u32, Flags, Flags)>,
+) {
+    if changes.is_empty() {
+        return;
+    }
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    let spawned = std::thread::Builder::new()
+        .name("mailway-flags-batch".into())
+        .spawn(move || {
+            use std::collections::HashMap;
+            let mut by_folder: HashMap<i64, Vec<(u32, Flags, Flags)>> = HashMap::new();
+            for (folder_id, uid, old, new) in changes {
+                by_folder.entry(folder_id).or_default().push((uid, old, new));
+            }
+            for (folder_id, items) in by_folder {
+                let res: CoreResult<()> = (|| {
+                    let folder = store
+                        .get_folder(folder_id)?
+                        .ok_or_else(|| Error::Config("文件夹已不存在".into()))?;
+                    let account = store
+                        .get_account(folder.account_id)?
+                        .ok_or_else(|| Error::Config("账号已不存在".into()))?;
+                    if account.protocol == Protocol::Pop3 {
+                        return Ok(()); // POP3 标志纯本地
+                    }
+                    pool.with(account.id, |conn| {
+                        conn.select(&folder.imap_name)?;
+                        let (mut seen_on, mut seen_off, mut flag_on, mut flag_off) =
+                            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+                        for (uid, old, new) in &items {
+                            if new.seen && !old.seen { seen_on.push(*uid); }
+                            if !new.seen && old.seen { seen_off.push(*uid); }
+                            if new.flagged && !old.flagged { flag_on.push(*uid); }
+                            if !new.flagged && old.flagged { flag_off.push(*uid); }
+                        }
+                        let set = |v: &[u32]| v.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+                        let engine = SyncEngine::new(&store);
+                        engine.batch_mark_seen(conn, &folder, &seen_on, true)?;
+                        engine.batch_mark_seen(conn, &folder, &seen_off, false)?;
+                        engine.batch_mark_flagged(conn, &folder, &flag_on, true)?;
+                        engine.batch_mark_flagged(conn, &folder, &flag_off, false)?;
+                        Ok(())
+                    })
+                })();
+                if let Err(err) = res {
+                    tracing::warn!(folder_id, "批量推标志失败: {}", err.user_message());
+                }
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!("起批量推标志线程失败: {err}");
+    }
+}
+
+/// 批量删除（多选的「删除 / 彻底删除」）。本地先删行；服务器按
+/// 「挪废纸篓 / 彻底删」分组批量推（挪走的信会从废纸篓重新出现）。
+#[tauri::command(rename_all = "snake_case")]
+pub fn batch_delete(
+    state: State<'_, AppState>,
+    message_ids: Vec<i64>,
+    permanent: bool,
+) -> Result<u32, String> {
+    if message_ids.is_empty() {
+        return Ok(0);
+    }
+    // 收集 (folder_id, uid) 并删本地行
+    let mut by_folder: std::collections::HashMap<i64, Vec<u32>> = std::collections::HashMap::new();
+    let mut accounts: std::collections::HashMap<i64, i64> = std::collections::HashMap::new(); // folder → account
+    let mut n = 0u32;
+    for id in &message_ids {
+        let Ok(Some(stored)) = state.store.get_message_raw(*id) else { continue };
+        let Ok(Some(folder)) = state.store.get_folder(stored.summary.folder_id) else { continue };
+        state.store.delete_message(*id).map_err(e)?;
+        by_folder.entry(folder.id).or_default().push(stored.summary.uid);
+        accounts.insert(folder.id, folder.account_id);
+        n += 1;
+    }
+    if n == 0 {
+        return Ok(0);
+    }
+    // 后台：每箱一趟（挪废纸篓或彻底删）
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    let spawned = std::thread::Builder::new()
+        .name("mailway-del-batch".into())
+        .spawn(move || {
+            for (folder_id, uids) in by_folder {
+                let res: CoreResult<()> = (|| {
+                    let folder = store
+                        .get_folder(folder_id)?
+                        .ok_or_else(|| Error::Config("文件夹已不存在".into()))?;
+                    let account = store
+                        .get_account(folder.account_id)?
+                        .ok_or_else(|| Error::Config("账号已不存在".into()))?;
+                    if account.protocol == Protocol::Pop3 {
+                        return Ok(()); // POP3 服务器只拉不删
+                    }
+                    // 找废纸篓（非彻底删才用）
+                    let trash = if permanent {
+                        None
+                    } else {
+                        store
+                            .list_folders(folder.account_id)?
+                            .into_iter()
+                            .find(|f| f.kind == FolderKind::Trash && f.id != folder_id)
+                    };
+                    pool.with(account.id, |conn| {
+                        let engine = SyncEngine::new(&store);
+                        match &trash {
+                            Some(t) => engine.batch_move(conn, &folder, &uids, t),
+                            None => engine.batch_delete(conn, &folder, &uids),
+                        }
+                    })?;
+                    // 挪箱的目标箱立刻追平（用户切过去就看得见）
+                    if let Some(t) = trash {
+                        let _ = pool.with(account.id, |conn| {
+                            SyncEngine::new(&store).sync_folder(conn, account.id, &t)
+                        });
+                    }
+                    Ok(())
+                })();
+                if let Err(err) = res {
+                    tracing::warn!(folder_id, "批量删除推服务器失败: {}", err.user_message());
+                }
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!("起批量删除线程失败: {err}");
+    }
+    Ok(n)
+}
+
+/// 批量挪箱（多选的「移动」）。本地先删行，目标箱追平后重新出现。
+#[tauri::command(rename_all = "snake_case")]
+pub fn batch_move(
+    state: State<'_, AppState>,
+    message_ids: Vec<i64>,
+    to_folder_id: i64,
+) -> Result<u32, String> {
+    if message_ids.is_empty() {
+        return Ok(0);
+    }
+    let to = state
+        .store
+        .get_folder(to_folder_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("目标文件夹"))?;
+    let mut by_folder: std::collections::HashMap<i64, Vec<u32>> = std::collections::HashMap::new();
+    let mut n = 0u32;
+    for id in &message_ids {
+        let Ok(Some(stored)) = state.store.get_message_raw(*id) else { continue };
+        if stored.summary.folder_id == to_folder_id {
+            continue;
+        }
+        // POP3：纯本地挪
+        if let Ok(Some(folder)) = state.store.get_folder(stored.summary.folder_id) {
+            if let Ok(Some(account)) = state.store.get_account(folder.account_id) {
+                if account.protocol == Protocol::Pop3 {
+                    state.store.move_message_local(*id, to_folder_id).map_err(e)?;
+                    n += 1;
+                    continue;
+                }
+            }
+        }
+        state.store.delete_message(*id).map_err(e)?;
+        by_folder.entry(stored.summary.folder_id).or_default().push(stored.summary.uid);
+        n += 1;
+    }
+    if n == 0 {
+        return Ok(0);
+    }
+    let store = Arc::clone(&state.store);
+    let pool = Arc::clone(&state.pool);
+    let spawned = std::thread::Builder::new()
+        .name("mailway-move-batch".into())
+        .spawn(move || {
+            for (folder_id, uids) in by_folder {
+                let res: CoreResult<()> = (|| {
+                    let folder = store
+                        .get_folder(folder_id)?
+                        .ok_or_else(|| Error::Config("文件夹已不存在".into()))?;
+                    let account = store
+                        .get_account(folder.account_id)?
+                        .ok_or_else(|| Error::Config("账号已不存在".into()))?;
+                    pool.with(account.id, |conn| {
+                        SyncEngine::new(&store).batch_move(conn, &folder, &uids, &to)
+                    })?;
+                    Ok(())
+                })();
+                if let Err(err) = res {
+                    tracing::warn!(folder_id, "批量挪箱失败: {}", err.user_message());
+                }
+            }
+            // 目标箱追平
+            if let Ok(Some(acc)) = store.get_account(to.account_id) {
+                if acc.protocol != Protocol::Pop3 {
+                    let _ = pool.with(acc.id, |conn| {
+                        SyncEngine::new(&store).sync_folder(conn, acc.id, &to)
+                    });
+                }
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!("起批量挪箱线程失败: {err}");
+    }
+    Ok(n)
+}
+
+/// 导出一封信为 `.eml`（原文一字不改）到「下载」目录，返回路径。
+#[tauri::command(rename_all = "snake_case")]
+pub fn export_message(state: State<'_, AppState>, message_id: i64) -> Result<String, String> {
+    let stored = state
+        .store
+        .get_message_raw(message_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("这封邮件"))?;
+    let raw = match &stored.raw_path {
+        Some(p) => state.store.read_raw(p).map_err(e)?,
+        None => return Err("这封邮件没有原文，导出不了".into()),
+    };
+    // 文件名消毒（同附件）
+    let safe: String = stored
+        .summary
+        .subject
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != ':')
+        .collect::<String>()
+        .trim()
+        .trim_start_matches('.')
+        .to_string();
+    let safe = if safe.is_empty() { "邮件".to_string() } else { safe };
+    let home = std::env::var("HOME").map_err(|_| "找不到家目录".to_string())?;
+    let dir = {
+        let d = std::path::PathBuf::from(&home).join("Downloads");
+        if d.is_dir() { d } else { std::path::PathBuf::from(&home) }
+    };
+    let mut path = dir.join(format!("{safe}.eml"));
+    if path.exists() {
+        for n in 1..1000 {
+            let candidate = dir.join(format!("{safe} ({n}).eml"));
+            if !candidate.exists() {
+                path = candidate;
+                break;
+            }
+        }
+    }
+    std::fs::write(&path, &raw).map_err(|err| format!("保存失败：{err}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 // ================================================================= 阅读页
 
 #[tauri::command(rename_all = "snake_case")]

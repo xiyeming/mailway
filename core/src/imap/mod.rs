@@ -261,10 +261,11 @@ impl Conn {
     ///
     /// 代价：不支持 RFC 6851 的老服务器会回 `NO`/`BAD`。调用方（sync 的
     /// 来信分类）按失败处理 —— 信留在原箱照常入库，什么都不丢。
-    pub fn uid_move(&mut self, uid: u32, target: &str) -> Result<()> {
+    /// `uid_set` 是 IMAP 序号集（"5" / "1,2,3" / "10:*"）—— 批量挪箱一条命令搞定。
+    pub fn uid_move(&mut self, uid_set: &str, target: &str) -> Result<()> {
         // 名字里有引号会截断 —— mUTF-7 编出来的 wire 名不会带引号，
         // 人手拼的才可能。真要防就是 RFC 6855 那套，犯不上。
-        let cmd = format!("UID MOVE {uid} \"{target}\"");
+        let cmd = format!("UID MOVE {uid_set} \"{target}\"");
         match &mut self.session {
             AnySession::Plain(s) => s.run_command_and_check_ok(cmd),
             AnySession::Tls(s) => s.run_command_and_check_ok(cmd),

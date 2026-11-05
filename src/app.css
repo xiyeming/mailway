@@ -3351,3 +3351,60 @@ button:focus-visible,
   color: var(--fg-faint);
   font-size: 11px;
 }
+
+
+/* ================================ 多选操作条 / 行勾选 ================= */
+.select-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+  flex-wrap: wrap;
+}
+
+.select-bar[hidden] {
+  display: none;
+}
+
+.select-bar .sel-count {
+  color: var(--fg-muted);
+  font-size: 12px;
+  min-width: 4.5rem;
+}
+
+.select-bar .sel-sep {
+  width: 1px;
+  height: 1.1rem;
+  background: var(--line);
+}
+
+.select-bar .btn {
+  padding: 0.28rem 0.7rem;
+  font-size: 12px;
+}
+
+.row-pick {
+  flex-shrink: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 1.5px solid var(--fg-faint);
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--bg);
+}
+
+.row-pick.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+}
+
+.row.is-picked {
+  background: var(--bg-active);
+}

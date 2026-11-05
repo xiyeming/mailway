@@ -398,6 +398,73 @@ impl<'s> SyncEngine<'s> {
         conn.uid_store_flags(&set, &["\\Seen"], &[])
     }
 
+    /// 批量改 \Seen（多选的「标为已读/未读」）：一条 `UID STORE` 搞定一批。
+    pub fn batch_mark_seen(
+        &self,
+        conn: &mut Conn,
+        folder: &Folder,
+        uids: &[u32],
+        seen: bool,
+    ) -> Result<()> {
+        if uids.is_empty() {
+            return Ok(());
+        }
+        conn.select(&folder.imap_name)?;
+        let set = uids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        if seen {
+            conn.uid_store_flags(&set, &["\\Seen"], &[])
+        } else {
+            conn.uid_store_flags(&set, &[], &["\\Seen"])
+        }
+    }
+
+    /// 批量改 \Flagged（多选的「标星」）。
+    pub fn batch_mark_flagged(
+        &self,
+        conn: &mut Conn,
+        folder: &Folder,
+        uids: &[u32],
+        flagged: bool,
+    ) -> Result<()> {
+        if uids.is_empty() {
+            return Ok(());
+        }
+        conn.select(&folder.imap_name)?;
+        let set = uids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        if flagged {
+            conn.uid_store_flags(&set, &["\\Flagged"], &[])
+        } else {
+            conn.uid_store_flags(&set, &[], &["\\Flagged"])
+        }
+    }
+
+    /// 批量挪箱：一条 `UID MOVE` 搞定一批。
+    pub fn batch_move(
+        &self,
+        conn: &mut Conn,
+        from: &Folder,
+        uids: &[u32],
+        to: &Folder,
+    ) -> Result<()> {
+        if uids.is_empty() {
+            return Ok(());
+        }
+        conn.select(&from.imap_name)?;
+        let set = uids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        conn.uid_move(&set, &to.imap_name)
+    }
+
+    /// 批量彻底删除：一条 `UID STORE \Deleted` + 一次 EXPUNGE。
+    pub fn batch_delete(&self, conn: &mut Conn, folder: &Folder, uids: &[u32]) -> Result<()> {
+        if uids.is_empty() {
+            return Ok(());
+        }
+        conn.select(&folder.imap_name)?;
+        let set = uids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        conn.uid_store_flags(&set, &["\\Deleted"], &[])?;
+        conn.uid_expunge(&set)
+    }
+
     /// 用户从界面上把一封信挪到别的信箱（「删除」= 挪进废纸篓）。
     ///
     /// 和来信分类的挪箱（[`Self::ingest`] 里的 `uid_move`）是同一个原语，
@@ -414,7 +481,7 @@ impl<'s> SyncEngine<'s> {
         to: &Folder,
     ) -> Result<()> {
         conn.select(&from.imap_name)?;
-        conn.uid_move(uid, &to.imap_name)
+        conn.uid_move(&uid.to_string(), &to.imap_name)
     }
 
     /// 彻底删除：打 `\Deleted` 再 EXPUNGE（见 [`Conn::uid_expunge`] 的
@@ -534,7 +601,7 @@ impl<'s> SyncEngine<'s> {
                         tracing::warn!(uid = f.uid, "规则改的标志推不回服务器（信照挪）: {e}");
                     }
                 }
-                match conn.uid_move(f.uid, &t.imap_name) {
+                match conn.uid_move(&f.uid.to_string(), &t.imap_name) {
                     Ok(()) => {
                         tracing::info!(uid = f.uid, to = %t.display_name, "来信分类：挪箱");
                         if !applied.labels.is_empty() {

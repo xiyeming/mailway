@@ -51,6 +51,9 @@ const state = {
   unreadOnly: false,
   /** 所有账号的文件夹（侧栏账号树）。 */
   allFolders: [],
+  /** 多选：选中的是 thread key（行），动作时展开成 message id。 */
+  selected: new Set(),
+  selectMode: false,
   /** `smart_counts()` 的结果（侧栏角标）。 */
   counts: null,
   /** 侧栏当前高亮项的 key（文件夹/智能箱/快捷箱）。 */
@@ -173,6 +176,7 @@ async function refreshSidebarData() {
 }
 
 async function useAccount(account) {
+  resetSelect();
   state.account = account;
   state.folderId = null;
   state.messageId = null;
@@ -424,7 +428,16 @@ function buildMail(stage) {
           hidden: true,
           onclick: markAllRead,
         }),
+        node("button", {
+          class: "btn-readall",
+          type: "button",
+          id: "btn-select",
+          text: "多选",
+          title: "多选邮件（全选/反选/批量操作）",
+          onclick: toggleSelectMode,
+        }),
       ),
+      node("div", { class: "select-bar", id: "select-bar", hidden: true }),
       node("div", { class: "message-list", id: "messages", role: "list" }),
     ),
     node("section", { class: "pane pane-reader" },
@@ -706,6 +719,7 @@ function renderSidebar() {
 
 /** 打开智能箱 / 快捷箱。`account_id=null` = 跨账号聚合（快捷）。 */
 async function openSmart(filter, account_id, title, isDrafts) {
+  resetSelect();
   state.smart = { filter, account_id, title, isDrafts };
   state.folderId = null;
   state.activeKey = account_id == null ? `quick:${filter}` : `smart:${filter}:${account_id}`;
@@ -1182,6 +1196,350 @@ async function loadList(folder) {
  * 草稿箱不算未读（草稿没有「读没读」这回事）；搜索模式下结果跨文件夹，
  * 「全标已读」没有单一目标，所以藏起来。
  */
+// ================================================================ 多选 / 右键菜单
+
+/** 多选模式开关。退出时清空选择。 */
+function toggleSelectMode() {
+  state.selectMode = !state.selectMode;
+  if (!state.selectMode) state.selected.clear();
+  repaintList();
+  renderSelectBar();
+}
+
+/** 选中操作条（列表头上方）：全选/反选 + 批量动作 + 取消。 */
+function renderSelectBar() {
+  const bar = document.getElementById("select-bar");
+  if (!bar) return;
+  clear(bar);
+  const btn = document.getElementById("btn-select");
+  if (btn) btn.textContent = state.selectMode ? "退出多选" : "多选";
+  if (!state.selectMode) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const n = state.selected.size;
+  // 注意：node() 不跳过 false —— disabled: false 会被 setAttribute 变成真禁用
+  const act = (text, fn, danger) =>
+    node("button", {
+      class: danger ? "btn btn-danger" : "btn",
+      type: "button",
+      text,
+      ...(n === 0 ? { disabled: true } : {}),
+      onclick: fn,
+    });
+  bar.append(
+    node("span", { class: "sel-count", text: n > 0 ? `已选 ${n} 项` : "点选邮件" }),
+    node("button", { class: "btn", type: "button", text: "全选", onclick: selectAll }),
+    node("button", { class: "btn", type: "button", text: "反选", onclick: invertSelect }),
+    node("span", { class: "sel-sep" }),
+    act("标为已读", () => batchMark(true)),
+    act("标星", () => batchStar(true)),
+    act("删除", batchDelete, true),
+    act("移动 ▾", batchMoveMenu),
+  );
+}
+
+function togglePick(t) {
+  if (state.selected.has(t.key)) state.selected.delete(t.key);
+  else state.selected.add(t.key);
+  repaintList();
+  renderSelectBar();
+}
+
+function selectAll() {
+  for (const t of groupIntoThreads(state.messages)) state.selected.add(t.key);
+  repaintList();
+  renderSelectBar();
+}
+
+function invertSelect() {
+  const cur = new Set(state.selected);
+  state.selected.clear();
+  for (const t of groupIntoThreads(state.messages)) {
+    if (!cur.has(t.key)) state.selected.add(t.key);
+  }
+  repaintList();
+  renderSelectBar();
+}
+
+/** 选中的 thread key → 全部 message id（动作作用到每一封信）。 */
+function selectedMessageIds() {
+  const keys = state.selected;
+  return groupIntoThreads(state.messages)
+    .filter((t) => keys.has(t.key))
+    .flatMap((t) => t.messages.map((x) => x.id));
+}
+
+/** 批量改标志：本地 立刻刷，服务器由后端按箱批量 UID STORE。 */
+async function batchSetFlags(seen, flagged) {
+  const ids = selectedMessageIds();
+  if (ids.length === 0) return;
+  try {
+    await invoke("batch_set_flags", { message_ids: ids, seen: seen ?? null, flagged: flagged ?? null });
+    for (const m of state.messages) {
+      if (ids.includes(m.id)) {
+        if (seen != null) m.flags.seen = seen;
+        if (flagged != null) m.flags.flagged = flagged;
+      }
+    }
+    toast(seen != null ? `已标为${seen ? "已读" : "未读"} ${ids.length} 封` : `已标星 ${ids.length} 封`);
+    state.selected.clear();
+    repaintList();
+    updateListCount();
+    renderSelectBar();
+    renderReader();
+  } catch (err) {
+    toast(`操作失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+const batchMark = (seen) => batchSetFlags(seen, null);
+const batchStar = (flagged) => batchSetFlags(null, flagged);
+
+/** 批量删除（去废纸篓；POP3 账号删本地行）。 */
+async function batchDelete() {
+  const ids = selectedMessageIds();
+  if (ids.length === 0) return;
+  try {
+    await invoke("batch_delete", { message_ids: ids, permanent: false });
+    state.messages = state.messages.filter((m) => !ids.includes(m.id));
+    toast(`已删除 ${ids.length} 封`);
+    state.selected.clear();
+    repaintList();
+    updateListCount();
+    renderSelectBar();
+    renderReader();
+  } catch (err) {
+    toast(`删除失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 批量移动：弹出文件夹选单。 */
+function batchMoveMenu(e) {
+  const ids = selectedMessageIds();
+  if (ids.length === 0) return;
+  const targets = (state.folders || []).filter((f) => f.id !== 0);
+  openMoveMenu(e, async (toId) => {
+    try {
+      await invoke("batch_move", { message_ids: ids, to_folder_id: toId });
+      state.messages = state.messages.filter((m) => !ids.includes(m.id));
+      toast(`已挪动 ${ids.length} 封`);
+      state.selected.clear();
+      repaintList();
+      updateListCount();
+      renderSelectBar();
+      renderReader();
+    } catch (err) {
+      toast(`挪箱失败：${err instanceof Error ? err.message : err}`);
+    }
+  }, targets);
+}
+
+/** 关掉所有浮层菜单（文件夹右键、邮件右键、移动选单）——开新菜单前先清场。 */
+function closeAllMenus() {
+  closeFolderCtx();
+  document.querySelectorAll(".menu-overlay").forEach((el) => el.remove());
+}
+
+/** 文件夹选单浮层（批量移动 / 右键「移动」共用）。 */
+function openMoveMenu(e, onPick, targets) {
+  closeAllMenus();
+  const overlay = node("div", { class: "menu-overlay", role: "presentation" });
+  overlay.addEventListener("mousedown", (ev) => {
+    if (ev.target === overlay) overlay.remove();
+  });
+  const menu = node("div", { class: "more-menu is-fixed", role: "menu" });
+  menu.addEventListener("click", (ev) => ev.stopPropagation());
+  if (targets.length === 0) {
+    menu.append(node("div", { class: "more-item is-off", text: "没有可挪到的文件夹" }));
+  } else {
+    for (const f of targets) {
+      menu.append(node("button", {
+        class: "more-item", type: "button", role: "menuitem",
+        text: `挪到「${f.display_name}」`,
+        onclick: () => {
+          overlay.remove();
+          onPick(f.id);
+        },
+      }));
+    }
+  }
+  menu.style.right = "auto";
+  menu.style.left = `${Math.max(8, Math.min(e.clientX ?? window.innerWidth - 220, window.innerWidth - 190))}px`;
+  menu.style.top = `${Math.max(8, Math.min(e.clientY ?? 160, window.innerHeight - 150))}px`;
+  overlay.append(menu);
+  document.body.append(overlay);
+}
+
+// --------------------------------------------------------------- 行右键菜单
+
+/** 邮件右键菜单（对齐网易邮箱大师）：回复/转发、置顶/已读/星标、移动、删除。 */
+function openMessageCtxMenu(e, t) {
+  e.preventDefault();
+  e.stopPropagation();
+  closeAllMenus();
+  const m = t.latest;
+  const unread = t.messages.some((x) => !x.flags.seen);
+  const ids = t.messages.map((x) => x.id);
+  const overlay = node("div", { class: "menu-overlay", role: "presentation" });
+  overlay.addEventListener("mousedown", (ev) => {
+    if (ev.target === overlay) overlay.remove();
+  });
+  const menu = node("div", { class: "more-menu is-fixed", role: "menu" });
+  menu.addEventListener("click", (ev) => ev.stopPropagation());
+  const item = (text, fn, danger, id) =>
+    node("button", {
+      class: danger ? "more-item is-danger" : "more-item",
+      type: "button",
+      role: "menuitem",
+      text,
+      ...(id ? { id } : {}),
+      onclick: () => fn(),
+    });
+
+  menu.append(
+    item("回复", () => { overlay.remove(); composeFromMessage(m.id, "reply"); }),
+    item("回复全部", () => { overlay.remove(); composeFromMessage(m.id, "replyAll"); }),
+    item("转发", () => { overlay.remove(); composeFromMessage(m.id, "forward"); }),
+    node("div", { class: "more-sep" }),
+    item(m.pinned ? "取消置顶" : "置顶", () => { overlay.remove(); togglePin(m.id); }),
+    item(unread ? "标为已读" : "标为未读", () => {
+      overlay.remove();
+      quickMarkRead(t, unread);
+    }),
+    item(m.flags.flagged ? "取消标星" : "标星", () => { overlay.remove(); toggleFlag(m.id); }),
+    node("div", { class: "more-sep" }),
+    item("移动 ▸", () => {
+      // 二级：换成文件夹选单（同一个浮层换内容）
+      clear(menu);
+      menu.append(
+        item("◂ 返回", () => {
+          clear(menu);
+          menu.append(...buildItems());
+        }),
+        node("div", { class: "more-sep" }),
+      );
+      const targets = (state.folders || []).filter((f) => f.id !== 0 && f.id !== m.folder_id);
+      if (targets.length === 0) {
+        menu.append(node("div", { class: "more-item is-off", text: "没有可挪到的文件夹" }));
+      } else {
+        for (const f of targets) {
+          menu.append(item(`挪到「${f.display_name}」`, async () => {
+            overlay.remove();
+            try {
+              await invoke("batch_move", { message_ids: ids, to_folder_id: f.id });
+              state.messages = state.messages.filter((x) => !ids.includes(x.id));
+              repaintList();
+              updateListCount();
+              renderReader();
+              toast(`已挪到「${f.display_name}」`);
+            } catch (err) {
+              toast(`挪箱失败：${err instanceof Error ? err.message : err}`);
+            }
+          }));
+        }
+      }
+    }),
+    node("div", { class: "more-sep" }),
+    item("删除", () => {
+      overlay.remove();
+      batchDeleteIds(ids);
+    }),
+    item("彻底删除", () => {
+      // 两步确认：第一下变文案，第二下真删
+      const btn = menu.querySelector("#ctx-purge");
+      if (btn.dataset.armed !== "1") {
+        btn.dataset.armed = "1";
+        btn.textContent = "再点一次确认彻底删除";
+        return;
+      }
+      overlay.remove();
+      purgeIds(ids);
+    }, true, "ctx-purge"),
+    node("div", { class: "more-sep" }),
+    item("导出邮件", () => {
+      overlay.remove();
+      exportMessage(m.id);
+    }),
+    item("按发件人搜索", () => {
+      overlay.remove();
+      const addr = m.from?.[0]?.address || "";
+      if (addr) runSearch(addr);
+    }),
+  );
+
+  // 供「移动 ▸」的返回用（重建一级项）
+  function buildItems() {
+    // 简化：返回时重新打开整个菜单最省事
+    setTimeout(() => {
+      overlay.remove();
+      openMessageCtxMenu(
+        { preventDefault() {}, stopPropagation() {}, clientX: e.clientX, clientY: e.clientY },
+        t,
+      );
+    }, 0);
+    return [];
+  }
+
+  menu.style.right = "auto";
+  menu.style.left = `${Math.max(8, Math.min(e.clientX, window.innerWidth - 190))}px`;
+  menu.style.top = `${Math.max(8, Math.min(e.clientY, window.innerHeight - 260))}px`;
+  overlay.append(menu);
+  document.body.append(overlay);
+}
+
+/** 从列表行发起 回复/回复全部/转发（先取详情再开撰写窗）。 */
+async function composeFromMessage(messageId, mode) {
+  try {
+    const d = await invoke("open_message", { message_id: messageId });
+    const account = state.accounts.find((a) => a.id === d.summary.account_id) || state.account;
+    openCompose({ account, replyMode: mode, source: d });
+  } catch (err) {
+    toast(`打开失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 批量删除（右键菜单用；本地删行 + 后端批量推）。 */
+async function batchDeleteIds(ids) {
+  if (ids.length === 0) return;
+  try {
+    await invoke("batch_delete", { message_ids: ids, permanent: false });
+    state.messages = state.messages.filter((m) => !ids.includes(m.id));
+    repaintList();
+    updateListCount();
+    renderReader();
+    toast(`已删除 ${ids.length} 封`);
+  } catch (err) {
+    toast(`删除失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 彻底删除（已两步确认）。 */
+async function purgeIds(ids) {
+  if (ids.length === 0) return;
+  try {
+    await invoke("batch_delete", { message_ids: ids, permanent: true });
+    state.messages = state.messages.filter((m) => !ids.includes(m.id));
+    repaintList();
+    updateListCount();
+    renderReader();
+    toast(`已彻底删除 ${ids.length} 封`);
+  } catch (err) {
+    toast(`删除失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** 导出 .eml 到下载目录。 */
+async function exportMessage(messageId) {
+  try {
+    const path = await invoke("export_message", { message_id: messageId });
+    toast(`已导出到 ${path}`);
+  } catch (err) {
+    toast(`导出失败：${err instanceof Error ? err.message : err}`);
+  }
+}
+
 function updateListCount() {
   const el = document.getElementById("list-count");
   const readAll = document.getElementById("btn-read-all");
@@ -1218,6 +1576,7 @@ function toast(msg) {
 }
 
 async function selectFolder(folderId) {
+  resetSelect();
   // 点的是别的账号的文件夹 → 先切到那个账号（撰写/回复才用对的账号）
   const folder = state.allFolders.find((f) => f.id === folderId);
   if (folder && (!state.account || state.account.id !== folder.account_id)) {
@@ -1397,15 +1756,27 @@ function renderThreadRow(t) {
   const sel =
     (state.thread && state.thread.key === t.key) ||
     (state.messageId != null && t.messages.some((x) => x.id === state.messageId));
+  const picked = state.selectMode && state.selected.has(t.key);
   return node(
     "button",
     {
-      class: `row${unread ? " is-unread" : ""}${sel ? " is-sel" : ""}`,
+      class: `row${unread ? " is-unread" : ""}${sel ? " is-sel" : ""}${picked ? " is-picked" : ""}`,
       type: "button",
       role: "listitem",
       "aria-current": sel ? "true" : "false",
-      onclick: () => openMessage(m.id),
+      onclick: () => {
+        // 多选模式：点行 = 勾选/取消，不打开
+        if (state.selectMode) {
+          togglePick(t);
+          return;
+        }
+        openMessage(m.id);
+      },
+      oncontextmenu: (e) => openMessageCtxMenu(e, t),
     },
+    state.selectMode
+      ? node("span", { class: `row-pick${picked ? " is-on" : ""}`, "aria-hidden": "true", text: picked ? "✓" : "" })
+      : null,
     renderAvatar(m.from?.[0] ?? {}),
     node(
       "div",
@@ -1504,6 +1875,13 @@ function repaintList() {
   const isDrafts = state.smart?.isDrafts || state.folders.find((f) => f.id === state.folderId)?.kind === "drafts";
   if (isDrafts) renderDraftList();
   else renderMessageList(state.messages);
+  renderSelectBar();
+}
+
+/** 换视图/换文件夹时退出多选（选择不该跨视图残留）。 */
+function resetSelect() {
+  state.selectMode = false;
+  state.selected.clear();
 }
 
 // ================================================================= 右栏
