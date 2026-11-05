@@ -32,6 +32,8 @@ if (typeof invoke !== "function") {
 
 const state = {
   account: null,
+  /** 折叠的文件夹 id（子文件夹树）。 */
+  collapsedFolders: new Set(),
   /** 全部账号。M3 起左栏并排显示它们，点哪个切哪个（见 `renderAccount`）。 */
   accounts: [],
   folders: [],
@@ -119,6 +121,13 @@ function fmtSender(m) {
 }
 
 // ================================================================= 侧栏：角标辅助
+
+/** 折叠/展开子文件夹树。 */
+function toggleFolderCollapse(id) {
+  if (state.collapsedFolders.has(id)) state.collapsedFolders.delete(id);
+  else state.collapsedFolders.add(id);
+  renderSidebar();
+}
 
 function folderUnread(id) {
   return (state.counts?.folder_unread || []).find(([k]) => k === id)?.[1] ?? 0;
@@ -614,16 +623,31 @@ const ACCOUNT_SMART = [
 ];
 const FOLDER_ICON = { inbox: "📥", sent: "📤", drafts: "📄", junk: "🗑", trash: "🗑", archive: "📦", normal: "📁" };
 
-function sidebarRow({ key, icon, name, count = 0, onclick, ctx }) {
+function sidebarRow({ key, icon, name, count = 0, onclick, ctx, depth = 0, hasKids = false, collapsed = false, ontoggle = null }) {
   return node(
     "button",
     {
       class: `side-row${state.activeKey === key ? " is-active" : ""}`,
       type: "button",
       "aria-current": state.activeKey === key ? "true" : "false",
+      ...(depth > 0 ? { "data-depth": String(Math.min(depth, 4)) } : {}),
       onclick,
       ...(ctx ? { oncontextmenu: ctx } : {}),
     },
+    // 展开/收起：有子文件夹才画（没有留空位对齐）
+    hasKids
+      ? node("span", {
+          class: `side-caret${collapsed ? "" : " is-open"}`,
+          role: "button",
+          tabindex: "0",
+          text: collapsed ? "▸" : "▾",
+          title: collapsed ? "展开子文件夹" : "收起子文件夹",
+          onclick: (e) => {
+            e.stopPropagation();
+            if (ontoggle) ontoggle();
+          },
+        })
+      : node("span", { class: "side-caret is-empty", "aria-hidden": "true" }),
     node("span", { class: "side-icon", text: icon }),
     node("span", { class: "side-name", text: name }),
     count > 0 ? node("span", { class: "side-count", text: String(count) }) : null,
@@ -695,20 +719,34 @@ function renderSidebar() {
     );
     const fs = sortFolders(state.allFolders.filter((f) => f.account_id === a.id && f.id !== 0));
     const hasServerDrafts = fs.some((f) => f.kind === "drafts");
-    let smartDone = false;
+    // 子文件夹树：parent_id 分组；父不在列表里的当根（防悬空丢行）
+    const byParent = new Map();
     for (const f of fs) {
-      box.append(
-        sidebarRow({
-          key: `folder:${f.id}`,
-          icon: FOLDER_ICON[f.kind] || "📁",
-          name: f.display_name,
-          count: folderUnread(f.id),
-          onclick: () => selectFolder(f.id),
-          // 右键文件夹行 = 新建/重命名/删除
-          ctx: (e) => openFolderCtxMenu(e, a, f),
-        }),
-      );
-      if (f.kind === "inbox" && !smartDone) {
+      const key = f.parent_id != null && fs.some((p) => p.id === f.parent_id) ? f.parent_id : 0;
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(f);
+    }
+    let smartDone = false;
+    const renderLevel = (parent, depth) => {
+      for (const f of sortFolders(byParent.get(parent) || [])) {
+        const kids = byParent.get(f.id) || [];
+        const collapsed = state.collapsedFolders.has(f.id);
+        box.append(
+          sidebarRow({
+            key: `folder:${f.id}`,
+            icon: FOLDER_ICON[f.kind] || "📁",
+            name: f.display_name,
+            count: folderUnread(f.id),
+            depth,
+            hasKids: kids.length > 0,
+            collapsed,
+            ontoggle: () => toggleFolderCollapse(f.id),
+            onclick: () => selectFolder(f.id),
+            // 右键文件夹行 = 新建/重命名/删除
+            ctx: (e) => openFolderCtxMenu(e, a, f),
+          }),
+        );
+        if (f.kind === "inbox" && !smartDone) {
         for (const s of ACCOUNT_SMART) {
           const n = s.filter === "unread" ? accountUnread(a.id) : accountFlagged(a.id);
           box.append(
@@ -724,7 +762,10 @@ function renderSidebar() {
         }
         smartDone = true;
       }
-    }
+        if (kids.length > 0 && !collapsed) renderLevel(f.id, depth + 1);
+      }
+    };
+    renderLevel(0, 0);
     // 本地草稿箱（服务器没给草稿箱时补一条；按账号，不共用 id:0 哨兵）
     if (!hasServerDrafts) {
       box.append(
@@ -1097,7 +1138,12 @@ function openFolderNameDialog(title, initial, onSubmit) {
     class: "form-input", type: "text", value: initial ?? "",
     placeholder: "文件夹名", "aria-label": "文件夹名",
   });
-  const status = node("p", { class: "muted", text: "" });
+  const status = node("p", { class: "dialog-status", text: "" });
+  const setStatus = (text, kind) => {
+    status.textContent = text;
+    status.classList.toggle("is-busy", kind === "busy");
+    status.classList.toggle("is-error", kind === "error");
+  };
   let busy = false;
   const close = () => {
     if (busy) return;
@@ -1109,7 +1155,7 @@ function openFolderNameDialog(title, initial, onSubmit) {
     if (busy) return;
     const name = input.value.trim();
     if (!name) {
-      status.textContent = "文件夹名不能空着";
+      setStatus("文件夹名不能空着", "error");
       return;
     }
     busy = true;
@@ -1117,9 +1163,12 @@ function openFolderNameDialog(title, initial, onSubmit) {
     okBtn.disabled = true;
     cancelBtn.disabled = true;
     okBtn.textContent = "请稍候…";
-    status.textContent = title.includes("重命名")
-      ? "正在重命名…（连服务器，慢网时可能要几秒）"
-      : "正在创建…（连服务器，慢网时可能要几秒）";
+    setStatus(
+      title.includes("重命名")
+        ? "正在重命名…（连服务器，慢网时可能要几秒）"
+        : "正在创建…（连服务器，慢网时可能要几秒）",
+      "busy",
+    );
     await nextFrame(); // busy 先上屏，再开网络请求
     try {
       await onSubmit(name);
@@ -1130,7 +1179,7 @@ function openFolderNameDialog(title, initial, onSubmit) {
       okBtn.disabled = false;
       cancelBtn.disabled = false;
       okBtn.textContent = "确定";
-      status.textContent = String(err instanceof Error ? err.message : err);
+      setStatus(String(err instanceof Error ? err.message : err), "error");
       input.focus();
     }
   };
@@ -1146,7 +1195,7 @@ function openFolderNameDialog(title, initial, onSubmit) {
   const root = node(
     "div", { class: "scrim", role: "dialog", "aria-label": title },
     node("form", {
-      class: "dialog",
+      class: "dialog is-narrow",
       onsubmit: (ev) => { ev.preventDefault(); submit(); },
     },
       node("header", { class: "dialog-head" }, node("h2", { class: "dialog-title", text: title })),

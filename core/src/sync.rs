@@ -815,14 +815,30 @@ impl<'s> SyncEngine<'s> {
     }
 
     /// 本地有就取出来，没有就按 LIST 的响应建一个。
+    ///
+    /// **按分隔符拆层级**：`父wire名/子wire名` → 显示名取最后一段、
+    /// `parent_id` 挂到父行上 —— 不拆的话子文件夹会被同步冲平成主文件夹
+    /// （upsert 的 ON CONFLICT 会把 parent_id 盖回 None）。
     fn ensure_folder(&self, account_id: i64, remote: &RemoteFolder) -> Result<Folder> {
         let kind = guess_folder_kind(&remote.imap_name, &remote.display_name);
+        let (parent_id, leaf_display) = match remote.delimiter {
+            Some(d) => match remote.imap_name.rsplit_once(d) {
+                Some((parent_wire, leaf_wire)) => {
+                    let parent = self
+                        .store
+                        .get_folder_by_imap_name(account_id, parent_wire)?;
+                    (parent.map(|p| p.id), crate::imap::utf7::decode(leaf_wire))
+                }
+                None => (None, remote.display_name.clone()),
+            },
+            None => (None, remote.display_name.clone()),
+        };
         let id = self.store.upsert_folder(&NewFolder {
             account_id,
             imap_name: &remote.imap_name,
-            display_name: &pretty_folder_name(&remote.display_name),
+            display_name: &pretty_folder_name(&leaf_display),
             kind,
-            parent_id: None,
+            parent_id,
             delimiter: remote.delimiter,
             subscribed: true,
         })?;

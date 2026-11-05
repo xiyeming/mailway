@@ -208,6 +208,17 @@ impl Store {
         Ok(id)
     }
 
+    /// 按 wire 名找文件夹（层级解析：子文件夹挂父行用）。
+    pub fn get_folder_by_imap_name(&self, account_id: i64, imap_name: &str) -> Result<Option<Folder>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT * FROM folders WHERE account_id = ?1 AND imap_name = ?2")?;
+        let row = stmt
+            .query_row(params![account_id, imap_name], row_to_folder)
+            .optional()?;
+        Ok(row)
+    }
+
     /// 新邮件提醒开关（文件夹级）。同步的 upsert 不碰这两列，用户偏好不丢。
     pub fn set_folder_remind(&self, folder_id: i64, on: bool) -> Result<()> {
         let conn = self.lock()?;
