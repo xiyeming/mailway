@@ -2226,18 +2226,13 @@ button:focus-visible,
   border-bottom: 1px solid var(--line);
 }
 
-/* 行式平铺（对齐网易）：无框输入 + 行间发丝线，不要再方框套方框 */
+/* 字段行：标签 + 统一输入框（同「添加账号」样式），行间留白 */
 .compose-field {
   display: grid;
   grid-template-columns: 3.5rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.compose-field:last-child {
-  border-bottom: 0;
+  padding: 0.32rem 0;
 }
 
 /* hidden 属性得赢过 display:grid（抄送/密送默认收起靠它） */
@@ -2412,6 +2407,62 @@ button:focus-visible,
 
 .tool-wrap {
   position: relative;
+}
+
+/* 工具条下拉左对齐按钮 —— 全局 .more-menu 是 right:0（贴右），
+   窄按钮会把菜单往左甩出半条工具条 */
+.tool-wrap > .more-menu {
+  left: 0;
+  right: auto;
+}
+
+/* 字体菜单几百项，限高滚动 */
+.more-menu.is-scroll {
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+/* 颜色盘：10 列小方格 + 自由取色 */
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1.35rem);
+  gap: 3px;
+  padding: 0.35rem;
+}
+
+.color-cell {
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.color-cell:hover {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  z-index: 1;
+}
+
+.color-custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.color-custom-input {
+  width: 2.6rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
 }
 
 .tool-gap {
@@ -3701,4 +3752,77 @@ button:focus-visible,
 
 .row.is-picked {
   background: var(--bg-active);
+}
+
+
+/* ================================================================ 统一输入框
+   全应用一个样（对齐「添加账号」）：2.55rem 高、圆角 10px、聚焦光环。
+   chip-input 不套盒子（它住在 chips 这个盒子里面）。 */
+.form-input,
+.folder-input,
+.compose-subject,
+input[type="text"]:not(.chip-input),
+input[type="search"],
+input[type="url"],
+input[type="password"],
+input[type="number"],
+input[type="email"],
+select.form-input {
+  height: 2.55rem;
+  padding: 0 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 0.95rem;
+  color: inherit;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.compose-signature,
+textarea.form-input,
+textarea.folder-input {
+  min-height: 2.55rem;
+  height: auto;
+  padding: 0.55rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 0.95rem;
+  color: inherit;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.form-input:focus-visible,
+.folder-input:focus-visible,
+.compose-subject:focus-visible,
+input[type="text"]:not(.chip-input):focus-visible,
+input[type="search"]:focus-visible,
+input[type="url"]:focus-visible,
+input[type="password"]:focus-visible,
+input[type="number"]:focus-visible,
+input[type="email"]:focus-visible,
+select.form-input:focus-visible,
+.compose-signature:focus-visible,
+textarea.form-input:focus-visible,
+textarea.folder-input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  outline: none;
+}
+
+/* 收件人 chips：整个盒子就是「输入框」（同款边框/聚焦光环） */
+.chips {
+  min-height: 2.55rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.chips:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }

@@ -1028,6 +1028,31 @@ fn delete_message_remote(store: &Store, pool: &ConnPool<Conn>, folder_id: i64, u
     })
 }
 
+// ================================================================= 写信
+
+/// 本机字体列表（fontconfig `fc-list`）。失败返回空，前端用内置兜底。
+/// 字体名是 `family[0]` 去重排序 —— 写信窗口的字体菜单直接用。
+#[tauri::command(rename_all = "snake_case")]
+pub fn list_system_fonts() -> Vec<String> {
+    use std::collections::BTreeSet;
+    let out = std::process::Command::new("fc-list")
+        .args(["--format", "%{family[0]}\n"])
+        .output();
+    let Ok(out) = out else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut set = BTreeSet::new();
+    for line in text.lines() {
+        let name = line.trim();
+        // 空行 / 点开头的隐藏族名（.notdef 之类）都不要
+        if !name.is_empty() && !name.starts_with('.') {
+            set.insert(name.to_string());
+        }
+    }
+    set.into_iter().collect()
+}
+
 // ================================================================= 文件夹菜单
 
 /// 新邮件提醒（文件夹级）。关了就不为这个箱的新信弹桌面通知。

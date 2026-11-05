@@ -125,6 +125,7 @@ fn main() {
             commands::batch_delete,
             commands::batch_move,
             commands::export_message,
+            commands::list_system_fonts,
             commands::set_folder_remind,
             commands::set_folder_quick,
             commands::clear_folder_mails,

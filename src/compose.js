@@ -926,6 +926,8 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
       },
     });
     wrap.append(button, menu);
+    wrap._menu = menu;
+    wrap._button = button;
     return wrap;
   };
   const menuItem = (text, title, fn) =>
@@ -958,30 +960,75 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
     menuItem("18px", "大", () => run("fontSize", "5")),
     menuItem("24px", "很大", () => run("fontSize", "6")),
   ]);
-  const fontDrop = dropdown("字体 ▾", "字体", [
-    menuItem("宋体", "宋体", () => run("fontName", "宋体")),
-    menuItem("黑体", "黑体", () => run("fontName", "黑体")),
-    menuItem("楷体", "楷体", () => run("fontName", "楷体")),
-    menuItem("微软雅黑", "微软雅黑", () => run("fontName", "微软雅黑")),
-    menuItem("Arial", "Arial", () => run("fontName", "Arial")),
-    menuItem("Verdana", "Verdana", () => run("fontName", "Verdana")),
-  ]);
-  const colorDrop = dropdown("A 颜色 ▾", "文字颜色", [
-    swatchItem("红", "红色", "sw-red", () => run("foreColor", "#b42318")),
-    swatchItem("橙", "橙色", "sw-orange", () => run("foreColor", "#b54708")),
-    swatchItem("绿", "绿色", "sw-green", () => run("foreColor", "#067647")),
-    swatchItem("蓝", "蓝色", "sw-blue", () => run("foreColor", "#2f6feb")),
-    swatchItem("紫", "紫色", "sw-purple", () => run("foreColor", "#6941c6")),
-    swatchItem("黑", "黑色", "sw-black", () => run("foreColor", "#1c1f26")),
-    swatchItem("灰", "灰色", "sw-gray", () => run("foreColor", "#6b7280")),
-  ]);
-  const hiDrop = dropdown("🖊 高亮 ▾", "高亮颜色", [
-    swatchItem("黄", "黄色", "sw-yellow", () => run("backColor", "#fef08a")),
-    swatchItem("绿", "绿色", "sw-green", () => run("backColor", "#bbf7d0")),
-    swatchItem("蓝", "蓝色", "sw-blue", () => run("backColor", "#bfdbfe")),
-    swatchItem("粉", "粉色", "sw-pink", () => run("backColor", "#fbcfe8")),
-    swatchItem("灰", "灰色", "sw-gray", () => run("backColor", "#e5e7eb")),
-  ]);
+
+  // 字体：**本机全部字体**（Rust 侧 fontconfig 列表），失败用内置兜底。
+  // 几百个字体是常事，菜单限高滚动。
+  const FALLBACK_FONTS = ["宋体", "黑体", "楷体", "微软雅黑", "Arial", "Verdana", "Times New Roman"];
+  const fontDrop = dropdown(
+    "字体 ▾", "字体",
+    FALLBACK_FONTS.map((f) => menuItem(f, f, () => run("fontName", f))),
+  );
+  fontDrop._menu.classList.add("is-scroll");
+  (async () => {
+    try {
+      const fonts = await invoke("list_system_fonts");
+      if (Array.isArray(fonts) && fonts.length > 0) {
+        clear(fontDrop._menu);
+        for (const f of fonts) {
+          fontDrop._menu.append(menuItem(f, f, () => run("fontName", f)));
+        }
+      }
+    } catch {
+      // 没 fontconfig 就用兜底，不打断写信
+    }
+  })();
+
+  // 颜色/高亮：预设色盘（6 行 × 10 列）+ 自由取色。
+  // 色块走内联 style —— CSP 的 style-src 有 'unsafe-inline'（见 app.css），
+  // 不走这里禁 style= 的约定（那是给 execCommand 正文输出的）。
+  const PALETTE = [
+    ["#ffffff", "#f5f5f5", "#e0e0e0", "#bdbdbd", "#9e9e9e", "#757575", "#616161", "#424242", "#212121", "#000000"],
+    ["#ffebee", "#ffcdd2", "#ef9a9a", "#e57373", "#ef5350", "#f44336", "#e53935", "#d32f2f", "#c62828", "#b71c1c"],
+    ["#fff8e1", "#ffecb3", "#ffe082", "#ffd54f", "#ffca28", "#ffb300", "#ffa000", "#fb8c00", "#f57c00", "#e65100"],
+    ["#e8f5e9", "#c8e6c9", "#a5d6a7", "#81c784", "#66bb6a", "#43a047", "#388e3c", "#2e7d32", "#1b5e20", "#004d40"],
+    ["#e3f2fd", "#bbdefb", "#90caf9", "#64b5f6", "#42a5f5", "#2196f3", "#1e88e5", "#1976d2", "#1565c0", "#0d47a1"],
+    ["#f3e5f5", "#e1bee7", "#ce93d8", "#ba68c8", "#ab47bc", "#8e24aa", "#7b1fa2", "#6a1b9a", "#4a148c", "#c2185b"],
+  ];
+  const colorPanel = (title, cmd, customDefault) => {
+    const grid = node("div", { class: "color-grid", role: "group", "aria-label": title });
+    for (const row of PALETTE) {
+      for (const hex of row) {
+        grid.append(
+          node("button", {
+            class: "color-cell", type: "button", title: hex, "aria-label": hex,
+            style: `background-color:${hex}`,
+            onclick: () => {
+              document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
+              run(cmd, hex);
+            },
+          }),
+        );
+      }
+    }
+    const custom = node("input", {
+      class: "color-custom-input", type: "color", value: customDefault,
+      title: "自由选择颜色", "aria-label": "自由选择颜色",
+      onchange: (e) => {
+        document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
+        run(cmd, e.target.value);
+      },
+    });
+    return dropdown(title, title, [
+      grid,
+      node("div", { class: "more-sep" }),
+      node("div", { class: "color-custom" },
+        node("span", { text: "更多颜色" }),
+        custom,
+      ),
+    ]);
+  };
+  const colorDrop = colorPanel("A 颜色 ▾", "foreColor", "#b42318");
+  const hiDrop = colorPanel("🖊 高亮 ▾", "backColor", "#fef08a");
 
   // 「＋插入 ▾」：链接/图片/表格/常用模板（模板菜单挂同一位置展开）
   const insertItems = [
