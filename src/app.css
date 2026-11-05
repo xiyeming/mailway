@@ -1474,7 +1474,11 @@ body {
 .more-menu {
   position: absolute;
   top: calc(100% + 4px);
-  right: 0;
+  max-height: min(30rem, calc(100vh - 110px));
+  overflow-y: auto;
+  /* 向右渲染（贴按钮左缘展开）。贴屏幕右缘的按钮由 JS flipMenuOverflow 翻转 */
+  left: 0;
+  right: auto;
   z-index: 100;
   min-width: 11rem;
   padding: 0.25rem;
@@ -3825,4 +3829,83 @@ textarea.folder-input:focus-visible {
 .chips:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+
+/* 自绘取色器（不弹 GTK 系统取色框——那玩意不跟主题） */
+.picker-wrap {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.55rem;
+  width: 15.5rem;
+}
+
+.pick-sv {
+  position: relative;
+  width: 100%;
+  height: 9.5rem;
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.pick-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
+  pointer-events: none;
+}
+
+.pick-hue {
+  position: relative;
+  width: 100%;
+  height: 0.95rem;
+  border-radius: 999px;
+  cursor: pointer;
+  touch-action: none;
+  background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+}
+
+.pick-hue-dot {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
+  pointer-events: none;
+}
+
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.pick-preview {
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.pick-hex {
+  flex: 1;
+  min-width: 0;
+  height: 2.2rem !important;
+  padding: 0 0.65rem !important;
+  font-family: monospace;
+}
+
+.pick-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
 }

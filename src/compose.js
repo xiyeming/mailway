@@ -994,6 +994,103 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
     ["#e3f2fd", "#bbdefb", "#90caf9", "#64b5f6", "#42a5f5", "#2196f3", "#1e88e5", "#1976d2", "#1565c0", "#0d47a1"],
     ["#f3e5f5", "#e1bee7", "#ce93d8", "#ba68c8", "#ab47bc", "#8e24aa", "#7b1fa2", "#6a1b9a", "#4a148c", "#c2185b"],
   ];
+  // ---- 自绘取色器：SV 方块 + 色相条 + hex 输入 + 预览（全 web，跟主题） ----
+  function hexToHsv(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return [0, 0, 0.5];
+    const n = parseInt(m[1], 16);
+    const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0;
+    if (d !== 0) {
+      if (max === r) h = ((g - b) / d + 6) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h /= 6;
+    }
+    return [h, max === 0 ? 0 : d / max, max];
+  }
+  function hsvToHex(h, s, v) {
+    const f = (n) => {
+      const k = (n + h * 12) % 12;
+      const x = v - v * s * Math.max(0, Math.min(k - 3, 9 - k, 1));
+      return Math.round(x * 255).toString(16).padStart(2, "0");
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+  }
+  /** 返回取色器 DOM。onPick(hex) 应用；onClose() 收起。 */
+  function makePicker(defaultHex, onPick, onClose) {
+    let [h, s, v] = hexToHsv(defaultHex);
+    const dot = node("span", { class: "pick-dot" });
+    const svArea = node("div", { class: "pick-sv" }, dot);
+    svArea.style.backgroundImage =
+      "linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent)";
+    const hueDot = node("span", { class: "pick-hue-dot" });
+    const hueBar = node("div", { class: "pick-hue" }, hueDot);
+    const preview = node("span", { class: "pick-preview" });
+    const hex = node("input", {
+      class: "form-input pick-hex", type: "text", placeholder: "#BF4040",
+      "aria-label": "颜色值",
+    });
+    const render = () => {
+      svArea.style.backgroundColor = `hsl(${Math.round(h * 360)}, 100%, 50%)`;
+      dot.style.left = `${s * 100}%`;
+      dot.style.top = `${(1 - v) * 100}%`;
+      hueDot.style.left = `${h * 100}%`;
+      const cur = hsvToHex(h, s, v);
+      preview.style.backgroundColor = cur;
+      if (document.activeElement !== hex) hex.value = cur.toUpperCase();
+    };
+    const drag = (elm, fn) => {
+      const move = (e) => {
+        const r = elm.getBoundingClientRect();
+        fn(
+          Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+          Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+        );
+      };
+      elm.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        elm.setPointerCapture(e.pointerId);
+        move(e);
+      });
+      elm.addEventListener("pointermove", (e) => {
+        if (elm.hasPointerCapture(e.pointerId)) move(e);
+      });
+    };
+    drag(svArea, (x, y) => {
+      s = x;
+      v = 1 - y;
+      render();
+    });
+    drag(hueBar, (x) => {
+      h = x;
+      render();
+    });
+    hex.addEventListener("change", () => {
+      const m = /^#?([0-9a-f]{6})$/i.exec(hex.value.trim());
+      if (m) {
+        [h, s, v] = hexToHsv(m[0]);
+        render();
+      } else {
+        hex.value = hsvToHex(h, s, v).toUpperCase();
+      }
+    });
+    render();
+    return node("div", { class: "picker-wrap" },
+      svArea,
+      hueBar,
+      node("div", { class: "pick-row" }, preview, hex),
+      node("div", { class: "pick-actions" },
+        node("button", { class: "btn", type: "button", text: "收起", onclick: onClose }),
+        node("button", {
+          class: "btn btn-primary", type: "button", text: "应用",
+          onclick: () => onPick(hsvToHex(h, s, v)),
+        }),
+      ),
+    );
+  }
+
   const colorPanel = (title, cmd, customDefault) => {
     const grid = node("div", { class: "color-grid", role: "group", "aria-label": title });
     for (const row of PALETTE) {
@@ -1010,22 +1107,34 @@ function buildTools(editor, onFormat, { attachBtn = null, tplMenu = null } = {})
         );
       }
     }
-    const custom = node("input", {
-      class: "color-custom-input", type: "color", value: customDefault,
-      title: "自由选择颜色", "aria-label": "自由选择颜色",
-      onchange: (e) => {
-        document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
-        run(cmd, e.target.value);
-      },
+    // 自绘取色器：**不弹 GTK 系统取色框**（那窗口跟系统深色走，不听主题）。
+    const customRow = node("div", { class: "color-custom" },
+      node("span", { text: "更多颜色" }),
+      node("button", {
+        class: "btn", type: "button", text: "展开 ▾",
+        "aria-label": "自由选择颜色",
+        onclick: (e) => {
+          e.stopPropagation();
+          customRow.hidden = true;
+          wrap._menu.append(pickerWrap);
+        },
+      }),
+    );
+    const pickerWrap = makePicker(customDefault, (hex) => {
+      document.querySelectorAll(".compose .more-menu").forEach((m) => { m.hidden = true; });
+      pickerWrap.remove();
+      customRow.hidden = false;
+      run(cmd, hex);
+    }, () => {
+      pickerWrap.remove();
+      customRow.hidden = false;
     });
-    return dropdown(title, title, [
+    const wrap = dropdown(title, title, [
       grid,
       node("div", { class: "more-sep" }),
-      node("div", { class: "color-custom" },
-        node("span", { text: "更多颜色" }),
-        custom,
-      ),
+      customRow,
     ]);
+    return wrap;
   };
   const colorDrop = colorPanel("A 颜色 ▾", "foreColor", "#b42318");
   const hiDrop = colorPanel("🖊 高亮 ▾", "backColor", "#fef08a");

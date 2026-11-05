@@ -31,3 +31,22 @@ export function clear(n) {
   n.replaceChildren();
   return n;
 }
+
+/** 弹出菜单不出屏：菜单默认向右渲染（left:0），贴屏幕右缘时翻转贴右。
+ *  每次点击后 / 窗口尺寸变化时跑一遍（app.js 挂全局钩子）。
+ *  is-fixed 的右键菜单自己管坐标，跳过。 */
+export function flipMenuOverflow() {
+  for (const menu of document.querySelectorAll(".more-menu:not([hidden])")) {
+    if (menu.classList.contains("is-fixed")) continue;
+    menu.style.left = "";
+    menu.style.right = "";
+    const r = menu.getBoundingClientRect();
+    if (r.right > window.innerWidth - 8) {
+      menu.style.left = "auto";
+      menu.style.right = "0";
+    } else if (r.left < 8) {
+      menu.style.left = "0";
+      menu.style.right = "auto";
+    }
+  }
+}

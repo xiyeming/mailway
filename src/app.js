@@ -13,7 +13,7 @@
 // IPC 参数名走 snake_case（`rename_all = "snake_case"`），和 Rust 完全一致。
 // Tauri 默认转 camelCase，那会在两份代码之间多一层对不上的名字。
 
-import { node, clear } from "./dom.js";
+import { node, clear, flipMenuOverflow } from "./dom.js";
 import { openCompose } from "./compose.js";
 import { openAccountForm } from "./accounts.js";
 
@@ -826,6 +826,10 @@ function closeFolderCtx() {
   openFolderCtx.remove();
   openFolderCtx = null;
 }
+
+// 菜单向右渲染，贴屏幕右缘自动翻转（防出屏）
+document.addEventListener("click", () => requestAnimationFrame(flipMenuOverflow), true);
+window.addEventListener("resize", flipMenuOverflow);
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeFolderCtx();
