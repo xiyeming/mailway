@@ -2106,9 +2106,11 @@ function groupIntoThreads(list) {
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(m);
   }
-  const threads = [...map.values()].map((msgs) => {
+  const threads = [...map.entries()].map(([key, msgs]) => {
     msgs.sort((a, b) => new Date(a.date || a.received_at) - new Date(b.date || b.received_at));
-    return { key: msgs[0].thread_key, count: msgs.length, latest: msgs[msgs.length - 1], messages: msgs };
+    // key 用**聚合键**（thread_key || subject || id）——msgs[0].thread_key 可能
+    // 为 null，会和「没有 thread_key 的其它会话」撞上 null === null
+    return { key, count: msgs.length, latest: msgs[msgs.length - 1], messages: msgs };
   });
   threads.sort((a, b) => new Date(b.latest.date || b.latest.received_at) - new Date(a.latest.date || a.latest.received_at));
   return threads;
@@ -2118,8 +2120,9 @@ function groupIntoThreads(list) {
 function renderThreadRow(t) {
   const m = t.latest;
   const unread = t.messages.some((x) => !x.flags.seen);
+  // 两支都要防 null：state.thread.key 为 null 时不能把所有空 key 的行都点亮
   const sel =
-    (state.thread && state.thread.key === t.key) ||
+    (state.thread && state.thread.key != null && t.key != null && state.thread.key === t.key) ||
     (state.messageId != null && t.messages.some((x) => x.id === state.messageId));
   const picked = state.selectMode && state.selected.has(t.key);
   return node(
