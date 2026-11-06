@@ -34,6 +34,8 @@ const state = {
   account: null,
   /** 折叠的文件夹 id（子文件夹树）。 */
   collapsedFolders: new Set(),
+  /** 折叠的账号 id（收起整个文件夹树）。 */
+  collapsedAccounts: new Set(),
   /** 全部账号。M3 起左栏并排显示它们，点哪个切哪个（见 `renderAccount`）。 */
   accounts: [],
   folders: [],
@@ -175,6 +177,13 @@ function applyPaneWidths() {
 }
 
 /** 折叠/展开子文件夹树。 */
+/** 折叠/展开账号的文件夹树（多账号侧栏太长时收起来）。 */
+function toggleAccountCollapse(id) {
+  if (state.collapsedAccounts.has(id)) state.collapsedAccounts.delete(id);
+  else state.collapsedAccounts.add(id);
+  renderSidebar();
+}
+
 function toggleFolderCollapse(id) {
   if (state.collapsedFolders.has(id)) state.collapsedFolders.delete(id);
   else state.collapsedFolders.add(id);
@@ -774,11 +783,27 @@ function renderSidebar() {
         // 右键账号行 = 这个账号下新建文件夹
         oncontextmenu: (e) => openFolderCtxMenu(e, a, null),
       },
-        node("span", { class: "side-acct-name", text: a.name || a.email }),
+        // 折叠箭头（同子文件夹的样式）；点行/点箭头都切换折叠
+        node("button", {
+          class: state.collapsedAccounts.has(a.id) ? "side-caret" : "side-caret is-open",
+          type: "button",
+          text: state.collapsedAccounts.has(a.id) ? "▸" : "▾",
+          title: state.collapsedAccounts.has(a.id) ? "展开文件夹" : "收起文件夹",
+          "aria-label": state.collapsedAccounts.has(a.id) ? "展开文件夹" : "收起文件夹",
+          onclick: (e) => {
+            e.stopPropagation();
+            toggleAccountCollapse(a.id);
+          },
+        }),
+        node("span", {
+          class: "side-acct-name", text: a.name || a.email,
+          onclick: () => toggleAccountCollapse(a.id),
+        }),
         node("span", { class: "side-acct-mail", text: a.email }),
         accountMenu(a),
       ),
     );
+    if (state.collapsedAccounts.has(a.id)) continue;
     const fs = sortFolders(state.allFolders.filter((f) => f.account_id === a.id && f.id !== 0));
     const hasServerDrafts = fs.some((f) => f.kind === "drafts");
     // 子文件夹树：parent_id 分组；父不在列表里的当根（防悬空丢行）
