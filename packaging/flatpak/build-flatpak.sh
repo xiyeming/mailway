@@ -12,7 +12,7 @@ set -euo pipefail
 BIN=${1:?用法: build-flatpak.sh <binary> <out.flatpak>}
 OUT=${2:?用法: build-flatpak.sh <binary> <out.flatpak>}
 APP=org.mailway.app
-RUNTIME_VER=${RUNTIME_VER:-47}   # org.gnome.Platform 版本（自带 webkitgtk-4.1）
+RUNTIME_VER=${RUNTIME_VER:-48}   # org.gnome.Platform 版本（自带 webkitgtk-4.1）
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 command -v flatpak >/dev/null || { echo "需要 flatpak"; exit 1; }
@@ -25,7 +25,7 @@ flatpak install --user -y --noninteractive flathub \
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-flatpak build-init "$WORK/build" "$APP" org.gnome.Sdk "$RUNTIME_VER"
+flatpak build-init "$WORK/build" "$APP" org.gnome.Sdk org.gnome.Platform "$RUNTIME_VER"
 
 # 直接把产物摆进 files/（不经沙箱编译）
 install -Dm755 "$BIN" "$WORK/build/files/bin/mailway"

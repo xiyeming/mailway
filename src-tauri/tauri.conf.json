@@ -36,7 +36,7 @@
       "icons/256x256.png",
       "icons/icon.png"
     ],
-    "category": "Network",
+    "category": "Productivity",
     "shortDescription": "原生 Wayland 邮件客户端",
     "longDescription": "Mailway —— Tauri 2 + Rust 的原生 Wayland 邮件客户端：IMAP/POP3/SMTP、多账号、会话聚合、AI 翻译。",
     "copyright": "MIT License"
