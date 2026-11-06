@@ -219,6 +219,8 @@ async function boot() {
 
     await fetchSettings();
     applyPaneWidths();
+    // 后台检查更新（有新版才弹横幅；失败不打扰）
+    checkForUpdates(true).catch(() => {});
 
     const accounts = await invoke("list_accounts");
     state.accounts = accounts;
@@ -3771,6 +3773,72 @@ function svgIcon(name, cls) {
   return svg;
 }
 
+// ================================================================= 更新提示
+
+/** 检查 GitHub Releases。silent=true 只在有新版时提示（启动时用）。 */
+async function checkForUpdates(silent = true) {
+  let info;
+  try {
+    const version = await invoke("app_version");
+    info = await invoke("check_update", { current: version });
+  } catch (err) {
+    if (!silent) statusNote(`检查更新失败：${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+  if (!info) {
+    if (!silent) statusNote("已是最新版本");
+    return null;
+  }
+  showUpdateBanner(info);
+  return info;
+}
+
+/** 顶部更新横幅：版本 + 更新说明入口 + 立即更新/稍后。 */
+function showUpdateBanner(info) {
+  document.getElementById("update-banner")?.remove();
+  const canSelfUpdate = !!info.appimage_url;
+  const actBtn = node("button", {
+    class: "btn btn-primary btn-sm", type: "button",
+    text: canSelfUpdate ? "立即更新" : "去下载",
+    onclick: async (ev) => {
+      const b = ev.currentTarget;
+      if (!canSelfUpdate) {
+        await invoke("open_external_url", { url: info.url }).catch(() => {});
+        return;
+      }
+      b.disabled = true;
+      b.textContent = "下载中…";
+      try {
+        statusNote("正在下载新版本…");
+        const path = await invoke("download_update", { url: info.appimage_url });
+        b.textContent = "替换中…";
+        // 成功会直接重启应用（apply_update 里 restart）
+        await invoke("apply_update", { new_path: path });
+      } catch (err) {
+        b.disabled = false;
+        b.textContent = "立即更新";
+        statusNote(`更新失败：${err instanceof Error ? err.message : err}（可到 GitHub 手动下载）`);
+        await invoke("open_external_url", { url: info.url }).catch(() => {});
+      }
+    },
+  });
+  const banner = node("div", { class: "update-banner", id: "update-banner", role: "status" },
+    node("span", { text: `发现新版本 ${info.tag}` }),
+    node("button", {
+      class: "ub-link", type: "button", text: "更新说明",
+      onclick: async () => {
+        await invoke("open_external_url", { url: info.url }).catch(() => {});
+      },
+    }),
+    actBtn,
+    node("button", {
+      class: "btn btn-sm", type: "button", text: "稍后",
+      onclick: () => banner.remove(),
+    }),
+  );
+  document.getElementById("app").append(banner);
+}
+
 const SETTINGS_SECTIONS = [
   ["system", "系统设置"],
   ["notify", "邮件通知"],
@@ -3921,12 +3989,43 @@ function renderSettingsSection(content, id) {
   } else if (id === "proxy") {
     renderProxySettings(content, s);
   } else if (id === "about") {
+    (async () => {
+      try {
+        const v = await invoke("app_version");
+        const el = document.getElementById("about-version");
+        if (el) el.textContent = `版本 ${v} · Tauri 2 + Rust`;
+        const info = await invoke("check_update", { current: v });
+        const latest = document.getElementById("about-latest");
+        if (latest) latest.textContent = info ? `有新版本 ${info.tag} 可更新` : "已是最新版本";
+      } catch {
+        const el = document.getElementById("about-version");
+        if (el) el.textContent = "版本信息获取失败";
+      }
+    })();
     content.append(
       node("h2", { class: "settings-title", text: "关于" }),
       node("div", { class: "settings-about" },
         node("p", { text: "Mailway —— 原生 Wayland 邮件客户端" }),
-        node("p", { class: "muted", text: "版本 0.1.0 · Tauri 2 + Rust · 本地优先，授权码进 keyring" }),
-        node("p", { class: "muted", text: "IMAP/SMTP 收发 · SQLite 本地库 · 界面自研，不嵌第三方素材" }),
+        node("p", { class: "muted", id: "about-version", text: "版本获取中…" }),
+        node("p", { class: "muted", id: "about-latest", text: "" }),
+        node("p", { class: "muted", text: "Tauri 2 + Rust · 本地优先，授权码进 keyring · IMAP/SMTP 收发 · SQLite 本地库" }),
+        node("div", { class: "setting-row" },
+          node("div", { class: "setting-info" }),
+          node("div", { class: "setting-ctl" },
+            node("button", {
+              class: "btn", type: "button", text: "检查更新",
+              onclick: (ev) => {
+                const b = ev.currentTarget;
+                b.disabled = true;
+                b.textContent = "检查中…";
+                checkForUpdates(false).finally(() => {
+                  b.disabled = false;
+                  b.textContent = "检查更新";
+                });
+              },
+            }),
+          ),
+        ),
       ),
     );
   }

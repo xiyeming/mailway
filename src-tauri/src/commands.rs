@@ -1028,6 +1028,37 @@ fn delete_message_remote(store: &Store, pool: &ConnPool<Conn>, folder_id: i64, u
     })
 }
 
+// ================================================================= 更新
+
+/// 当前版本（workspace 版本，和 tauri.conf 的 version 一致）。
+#[tauri::command]
+pub fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// 检查 GitHub Releases 有没有新版。没有 → None。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn check_update(current: String) -> Result<Option<crate::updater::UpdateInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::updater::check(&current))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+/// 下载新版 AppImage（落盘 + 执行权限），返回路径。
+#[tauri::command]
+pub async fn download_update(url: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::updater::download_appimage(&url))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+/// 用下载好的包替换自身并重启（仅 AppImage；其他安装方式报错引导手动下载）。
+#[tauri::command]
+pub fn apply_update(app: tauri::AppHandle, new_path: String) -> Result<(), String> {
+    crate::updater::replace_self(&new_path)?;
+    app.restart();
+}
+
 // ================================================================= 代理
 
 /// 从设置装配代理（启动时 + 保存设置后调用）。密码在 keyring，设置里不存。

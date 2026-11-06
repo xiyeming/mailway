@@ -4847,3 +4847,36 @@ input[type="search"]:focus-visible {
   border-color: var(--fg-faint);
   box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
 }
+
+
+/* ================================================================ 更新横幅 */
+.update-banner {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-full);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: var(--sh-md);
+  font-size: var(--fs-md);
+}
+
+.update-banner .ub-link {
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.update-banner .ub-link:hover {
+  color: var(--fg);
+}

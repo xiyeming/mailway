@@ -11,6 +11,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod updater;
 mod demo;
 mod google_oauth;
 mod secrets;
@@ -127,6 +128,10 @@ fn main() {
             commands::batch_delete,
             commands::batch_move,
             commands::export_message,
+            commands::app_version,
+            commands::check_update,
+            commands::download_update,
+            commands::apply_update,
             commands::get_proxy_settings,
             commands::save_proxy_settings,
             commands::test_proxy,
