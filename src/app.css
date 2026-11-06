@@ -4717,3 +4717,39 @@ input[type="search"]:focus-visible {
   border-color: transparent;
   background: var(--bg-active);
 }
+
+
+/* ================================================================ D2 统一色系终版
+   「面板割裂」的根：顶栏灰带/侧栏灰块/灰画布/白列表/灰面板 = 五档底色。
+   一刀切：所有面板一律 --bg 纯白；灰只留一档（--bg-hover 族），
+   只出现在交互件上（输入框/选中/hover/徽标/空态面板）。 */
+
+.shell,
+.pane,
+.rail,
+.reader,
+#messages,
+.side-top,
+.pane-head {
+  background: var(--bg);
+}
+
+.pane-head {
+  border-bottom: 0;
+}
+
+.side-top {
+  padding-bottom: 0;
+}
+
+/* 唯一的灰面板：阅读空态（样张的灰卡） */
+.reader .empty {
+  background: var(--bg-hover);
+  border: 0;
+}
+
+/* 画布令牌也归白，别再有别的底色偷偷进来 */
+:root {
+  --canvas: var(--bg);
+  --panel-2: var(--bg);
+}
