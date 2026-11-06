@@ -444,7 +444,9 @@ async function switchMode(mode) {
 function buildMail(stage) {
   stage.append(
     node("aside", { class: "pane pane-folders" },
-      node("div", { class: "pane-split", "data-split": "folders", title: "拖动调整侧栏宽度" }),
+      node("div", { class: "pane-split", "data-split": "folders", title: "拖动调整侧栏宽度" },
+        node("span", { class: "split-grip", "aria-hidden": "true" }),
+      ),
       node("div", { class: "side-top" },
         node("div", { class: "side-actions" },
           node("button", {
@@ -504,7 +506,9 @@ function buildMail(stage) {
       ),
       node("div", { class: "select-bar", id: "select-bar", hidden: true }),
       node("div", { class: "message-list", id: "messages", role: "list" }),
-      node("div", { class: "pane-split", "data-split": "list", title: "拖动调整列表宽度" }),
+      node("div", { class: "pane-split", "data-split": "list", title: "拖动调整列表宽度" },
+        node("span", { class: "split-grip", "aria-hidden": "true" }),
+      ),
     ),
     node("section", { class: "pane pane-reader" },
       // 「阅读」标题栏样张没有——D2 精修三藏掉（CSS .is-reader-head）

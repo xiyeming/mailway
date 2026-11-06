@@ -4774,62 +4774,74 @@ input[type="search"]:focus-visible {
 
 
 /* ================================================================ 栏宽拉手
-   方案A「胶囊握把」：缝上悬浮竖胶囊（双握纹），离滚动条一档、按住左右拖。
-   hover 浮起加深；拖动中加阴影。走 CSSOM 不碰 CSP。 */
+   热区条整条透明（贴缝 12px）；胶囊握把是子件——
+   **经过（hover）即显，移开 2s 后淡出**；拖动/聚焦时保持常显。
+   过渡节律：淡入 140ms 立即；淡出 320ms 但延迟 2s。 */
 .pane {
   position: relative;
 }
 
 .pane-split {
   position: absolute;
-  top: 50%;
-  right: -8px;
-  transform: translateY(-50%);
-  width: 15px;
-  height: 52px;
-  border-radius: 999px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+  top: 0;
+  bottom: 0;
+  right: -6px;
+  width: 12px;
   cursor: col-resize;
   z-index: 60;
   touch-action: none;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-/* 双握纹 */
-.pane-split::before,
-.pane-split::after {
+.split-grip {
+  position: absolute;
+  top: 50%;
+  right: -2px;
+  transform: translateY(-50%);
+  width: 13px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--fg-faint) 35%, var(--bg));
+  box-shadow: 0 1px 6px rgb(0 0 0 / 8%);
+  opacity: 0;
+  transition: opacity 320ms ease 2s, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* 双握纹（2×14，居中三档留白） */
+.split-grip::before,
+.split-grip::after {
   content: "";
   position: absolute;
   top: 50%;
   width: 2px;
-  height: 18px;
+  height: 14px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--fg-faint) 55%, var(--bg));
+  background: color-mix(in srgb, var(--fg-faint) 45%, var(--bg));
   transform: translateY(-50%);
-  transition: background 120ms ease;
 }
 
-.pane-split::before {
-  left: 3.5px;
+.split-grip::before {
+  left: 3px;
 }
 
-.pane-split::after {
-  right: 3.5px;
+.split-grip::after {
+  right: 3px;
 }
 
-.pane-split:hover {
+/* 经过即显（140ms 立即淡入）；拖动/键盘聚焦时保持 */
+.pane-split:hover .split-grip,
+.pane-split.is-drag .split-grip,
+.pane-split:focus-within .split-grip {
+  opacity: 1;
+  transition: opacity 140ms ease 0s;
+}
+
+.pane-split:hover .split-grip {
   border-color: color-mix(in srgb, var(--fg-faint) 55%, var(--bg));
-  box-shadow: 0 3px 12px rgb(0 0 0 / 16%);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 14%);
 }
 
-.pane-split:hover::before,
-.pane-split:hover::after {
-  background: var(--fg-muted);
-}
-
-.pane-split.is-drag {
+.pane-split.is-drag .split-grip {
   border-color: var(--fg-faint);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
 }
