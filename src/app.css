@@ -98,7 +98,6 @@
   --panel-2: #17171a;
   --card-line: #232326;
   --card-sel: #242428;
-  --accent-fg: #ffffff;
   --danger: #f0716a;
   --warn-bg: #2c2510;
   --warn-line: #4a3d1a;
@@ -2008,6 +2007,9 @@ button.thread-item:hover {
 /* 正文。这里是**唯一**允许 innerHTML 的地方，内容来自服务端净化器。 */
 .mail-body {
   overflow-wrap: anywhere;
+  /* 宽邮件（大表格/图片）超宽时横向滚动，不再裁死 */
+  overflow-x: auto;
+  max-width: 100%;
   /* containment：正文里 position:fixed 的元素跑不出这个盒子 ——
      邮件 CSS 可能是恶意的（钓鱼盖层），这里结构性兜底（scrub_css 的
      position 过滤是第一道，转义绕过也翻不出去）。 */
