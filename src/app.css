@@ -3805,7 +3805,8 @@ select.form-input {
   border-radius: var(--r-md);
   background: var(--bg);
   font: inherit;
-  font-size: var(--fs-lg);
+  /* 表单文字与标签同阶（13px）：输入文字不该比自己的标签还大 */
+  font-size: var(--fs-md);
   color: inherit;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -4232,4 +4233,50 @@ textarea.folder-input:focus-visible {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+}
+
+
+/* ================================================================ 表单协调档
+   规则：desc 12px < label 13px ≤ 输入 13px（主输入 15px）；控件高度配文字
+   （紧凑 2.15rem / 主输入 2.55rem）。左右视觉重量对半。 */
+
+.setting-label {
+  font-size: var(--fs-md);
+}
+
+.setting-desc {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* 设置行是密集表单：控件紧凑档，别让 40px 大盒子压过两行小字 */
+.setting-row .form-input,
+.setting-row .custom-select,
+.setting-row .btn,
+.setting-row .btn-sm {
+  height: 2.15rem;
+}
+
+.setting-row textarea.form-input {
+  height: auto;
+  min-height: 2.15rem;
+}
+
+/* 主输入（对话框/写信字段）保持大档：那里输入框是视觉主角 */
+.dialog-body .form-input,
+.dialog-body .input,
+.compose-subject,
+.compose-fields .chip-input {
+  font-size: var(--fs-lg);
+}
+
+/* 标签在上时的呼吸感（0.25rem 配 40px 框太挤） */
+.form-field {
+  gap: 0.4rem;
+}
+
+/* chips 文字跟上盒子（12px 在 40px 框里太小） */
+.chips .chip,
+.chips .chip-input {
+  font-size: var(--fs-md);
 }
