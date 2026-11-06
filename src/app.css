@@ -16,7 +16,7 @@
   --bg: #ffffff;
   --bg-sunken: #f2f3fa;
   --bg-hover: #eceef8;
-  --bg-active: #e0e3f4;
+  --bg-active: #ebebee;
   --fg: #1c2333;
   --fg-muted: #59616e;
   --fg-faint: #79818e;
@@ -85,7 +85,7 @@
   --bg: #171a20;
   --bg-sunken: #12141a;
   --bg-hover: #232833;
-  --bg-active: #2c3442;
+  --bg-active: #2a2a2e;
   --fg: #e7eaf0;
   --fg-muted: #9aa4b2;
   --fg-faint: #6b7482;
@@ -4446,10 +4446,10 @@ input[type="search"] {
 }
 
 /* 头像：低饱和实色（不渐变） */
-.avatar-c0 { background: #6c72c9; }
+.avatar-c0 { background: #5b6fc4; }
 .avatar-c1 { background: #4c9a8e; }
 .avatar-c2 { background: #bd6482; }
-.avatar-c3 { background: #8a7bb8; }
+.avatar-c3 { background: #b58a3d; }
 .avatar-c4 { background: #a5845c; }
 .avatar-c5 { background: #6e7f95; }
 .avatar-c6 { background: #c07878; }
