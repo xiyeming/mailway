@@ -122,6 +122,58 @@ function fmtSender(m) {
 
 // ================================================================= 侧栏：角标辅助
 
+/** 栏宽拖拽：分隔条拖动改 --pane-folders / --pane-list，松手存设置。
+ *  走 CSSOM（el.style.x）不碰 style 属性，CSP 不拦。 */
+function initPaneSplitters() {
+  document.addEventListener("pointerdown", (e) => {
+    const sp = e.target.closest && e.target.closest(".pane-split");
+    if (!sp) return;
+    e.preventDefault();
+    sp.classList.add("is-drag");
+    const kind = sp.dataset.split;
+    const varOf = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue("--pane-folders"), 10) || 220;
+    const move = (ev) => {
+      const stage = document.querySelector(".stage");
+      if (!stage) return;
+      const left = stage.getBoundingClientRect().left;
+      if (kind === "folders") {
+        const w = Math.min(340, Math.max(170, ev.clientX - left));
+        document.documentElement.style.setProperty("--pane-folders", `${w}px`);
+      } else {
+        const w = Math.min(600, Math.max(260, ev.clientX - left - varOf()));
+        document.documentElement.style.setProperty("--pane-list", `${w}px`);
+      }
+    };
+    const up = () => {
+      sp.classList.remove("is-drag");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      persistPaneWidths();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+}
+
+function persistPaneWidths() {
+  const cs = getComputedStyle(document.documentElement);
+  const fw = parseInt(cs.getPropertyValue("--pane-folders"), 10) || 220;
+  const lw = parseInt(cs.getPropertyValue("--pane-list"), 10) || 360;
+  invoke("set_setting", { key: "pane_folders_w", value: String(fw) }).catch(() => {});
+  invoke("set_setting", { key: "pane_list_w", value: String(lw) }).catch(() => {});
+}
+
+/** 启动时把记忆的栏宽套回去。 */
+function applyPaneWidths() {
+  const s = state.settings || {};
+  if (s.pane_folders_w) {
+    document.documentElement.style.setProperty("--pane-folders", `${s.pane_folders_w}px`);
+  }
+  if (s.pane_list_w) {
+    document.documentElement.style.setProperty("--pane-list", `${s.pane_list_w}px`);
+  }
+}
+
 /** 折叠/展开子文件夹树。 */
 function toggleFolderCollapse(id) {
   if (state.collapsedFolders.has(id)) state.collapsedFolders.delete(id);
@@ -157,6 +209,7 @@ async function boot() {
     if (pong !== "pong") throw new Error(`core_ping 返回了 ${pong}`);
 
     await fetchSettings();
+    applyPaneWidths();
 
     const accounts = await invoke("list_accounts");
     state.accounts = accounts;
@@ -391,6 +444,7 @@ async function switchMode(mode) {
 function buildMail(stage) {
   stage.append(
     node("aside", { class: "pane pane-folders" },
+      node("div", { class: "pane-split", "data-split": "folders", title: "拖动调整侧栏宽度" }),
       node("div", { class: "side-top" },
         node("div", { class: "side-actions" },
           node("button", {
@@ -450,6 +504,7 @@ function buildMail(stage) {
       ),
       node("div", { class: "select-bar", id: "select-bar", hidden: true }),
       node("div", { class: "message-list", id: "messages", role: "list" }),
+      node("div", { class: "pane-split", "data-split": "list", title: "拖动调整列表宽度" }),
     ),
     node("section", { class: "pane pane-reader" },
       // 「阅读」标题栏样张没有——D2 精修三藏掉（CSS .is-reader-head）
@@ -4280,3 +4335,7 @@ try {
 
 renderShell();
 boot();
+
+
+// 栏宽分隔条只绑一次（全局委托）
+initPaneSplitters();
