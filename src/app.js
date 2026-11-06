@@ -452,7 +452,8 @@ function buildMail(stage) {
       node("div", { class: "message-list", id: "messages", role: "list" }),
     ),
     node("section", { class: "pane pane-reader" },
-      node("header", { class: "pane-head" },
+      // 「阅读」标题栏样张没有——D2 精修三藏掉（CSS .is-reader-head）
+      node("header", { class: "pane-head is-reader-head" },
         node("span", { id: "reader-title", text: "阅读" }),
       ),
       node("div", { class: "reader", id: "reader" }),

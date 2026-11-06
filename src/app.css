@@ -15,7 +15,7 @@
 :root {
   --bg: #ffffff;
   --bg-sunken: #f2f3fa;
-  --bg-hover: #eceef8;
+  --bg-hover: #f2f2f4;
   --bg-active: #ebebee;
   --fg: #1c2333;
   --fg-muted: #59616e;
@@ -84,7 +84,7 @@
   color-scheme: dark;
   --bg: #171a20;
   --bg-sunken: #12141a;
-  --bg-hover: #232833;
+  --bg-hover: #242427;
   --bg-active: #2a2a2e;
   --fg: #e7eaf0;
   --fg-muted: #9aa4b2;
@@ -4676,4 +4676,44 @@ button.thread-item:hover {
 /* ⑥ 侧栏行距（样张 8px/12px） */
 .side-row {
   padding: 8px 12px;
+}
+
+
+/* ================================================================ D2 精修三
+   逐图放大 diff：hover 紫底 / 阅读标题栏 / 图标细一号 / 搜索聚焦双框。 */
+
+/* ① hover/选中彻底中性（上轮漏了 hover——鼠标停哪哪发紫就是它） */
+.row:hover {
+  background: var(--bg-hover);
+}
+
+.side-row:hover {
+  background: var(--bg-hover);
+}
+
+/* ② 「阅读」标题栏样张没有——藏掉，阅读面板从顶到底 */
+.pane-head.is-reader-head {
+  display: none;
+}
+
+/* ③ 图标对齐样张的敦实感 */
+.ic-svg {
+  stroke-width: 2.3;
+}
+
+.rail-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.side-icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* ④ 搜索框聚焦只变底色，不画黑环（accent 归墨后光环成了黑双框） */
+input[type="search"]:focus-visible {
+  box-shadow: none;
+  border-color: transparent;
+  background: var(--bg-active);
 }
