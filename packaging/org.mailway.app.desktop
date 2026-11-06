@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mailway
+GenericName=邮件客户端
+Comment=原生 Wayland 邮件客户端
+Exec=mailway %u
+Icon=org.mailway.app
+Categories=Network;Email;
+Terminal=false
+StartupWMClass=mailway
+Keywords=mail;email;imap;邮件;邮箱;

@@ -1,0 +1,31 @@
+# Maintainer: xiyeming <https://github.com/xiyeming>
+# Mailway —— 原生 Wayland 邮件客户端（Tauri 2 + Rust）
+pkgname=mailway
+pkgver=0.0.1
+pkgrel=1
+pkgdesc="原生 Wayland 邮件客户端（Tauri 2 + Rust）"
+arch=('x86_64')
+url="https://github.com/xiyeming/mailway"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'openssl' 'sqlite' 'hicolor-icon-theme')
+makedepends=('rust' 'pkgconf')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  export CARGO_TARGET_DIR=target
+  cargo build --release --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/mailway "$pkgdir/usr/bin/mailway"
+  install -Dm644 packaging/org.mailway.app.desktop \
+    "$pkgdir/usr/share/applications/org.mailway.app.desktop"
+  for s in 32 128 256 512; do
+    install -Dm644 "src-tauri/icons/${s}x${s}.png" \
+      "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/org.mailway.app.png"
+  done
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
