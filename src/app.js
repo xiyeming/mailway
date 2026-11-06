@@ -2257,6 +2257,9 @@ function resetSelect() {
 
 async function openMessage(messageId) {
   state.messageId = messageId;
+  // 旧会话先清掉：它还指着上一行，和新 messageId 一起会把两行都点亮
+  // （「点一行亮两行」的真凶——上次打开的行 + 这次点的行）。
+  state.thread = null;
   repaintList();
   document.querySelector(".shell")?.classList.add("is-reading");
 
@@ -2292,6 +2295,8 @@ async function openMessage(messageId) {
       }
     }
     state.thread = { key: tk, messages: members };
+    // 会话到位后再定一次选中态（加载期间的临时状态收尾）
+    repaintList();
     renderReader();
   } catch (err) {
     clear(reader).append(
