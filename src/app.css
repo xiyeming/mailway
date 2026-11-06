@@ -2006,10 +2006,21 @@ button.thread-item:hover {
 
 /* 正文。这里是**唯一**允许 innerHTML 的地方，内容来自服务端净化器。 */
 .mail-body {
-  overflow-wrap: anywhere;
+  /* break-word 而不是 anywhere：anywhere 把所有文本的最小内容宽压成
+     1 个字符 —— GitHub 通知邮件的表格列被挤成竖排单字（「Annotations」
+     一字一行）。break-word 只在真装不下时才断词，不破坏表格列宽。 */
+  overflow-wrap: break-word;
   /* 宽邮件（大表格/图片）超宽时横向滚动，不再裁死 */
   overflow-x: auto;
   max-width: 100%;
+
+  /* 按钮式链接（带内边距的 inline-block，GitHub 通知的绿色按钮就是它）：
+     邮件自带 line-height:1.5 的半行距把字往上顶，视觉不居中 —— 收紧行盒
+     让字落在几何中心。!important 才压得过邮件的内联 style（安全：纯删除
+     半行距，不引入新内容）。 */
+  a[style*="inline-block"][style*="padding"] {
+    line-height: 1.2 !important;
+  }
   /* containment：正文里 position:fixed 的元素跑不出这个盒子 ——
      邮件 CSS 可能是恶意的（钓鱼盖层），这里结构性兜底（scrub_css 的
      position 过滤是第一道，转义绕过也翻不出去）。 */
