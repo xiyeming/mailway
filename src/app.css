@@ -4525,3 +4525,10 @@ button.thread-item:hover {
 #messages {
   gap: 6px;
 }
+
+
+/* 日期在首行右上（D2 样张位置）：推到行尾、tabular 对齐 */
+.row-l1 .date {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}

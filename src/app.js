@@ -2057,6 +2057,7 @@ function renderThreadRow(t) {
         node("span", { class: `dot${unread ? "" : " is-off"}`, "aria-hidden": "true" }),
         node("span", { class: "from", text: fmtSender(m.from[0] ?? {}) }),
         m.thread_count > 1 ? node("span", { class: "thread-count", text: String(m.thread_count) }) : null,
+        node("span", { class: "date", text: fmtRowDate(m.date || m.received_at) }),
       ),
       node("span", { class: "subject", text: m.subject || "（无主题）" }),
       node(
@@ -2071,7 +2072,6 @@ function renderThreadRow(t) {
           m.flags.flagged ? node("span", { class: "ic ic-star", text: "★" }) : null,
           m.pinned ? node("span", { class: "ic ic-pin", text: "📌" }) : null,
         ),
-        node("span", { class: "date", text: fmtRowDate(m.date || m.received_at) }),
       ),
     ),
     // 快速已读/未读：不打开邮件就改标志（会话整会话一起），并推回服务器。
@@ -3657,7 +3657,7 @@ const ICONS = {
   users: [["circle", { cx: 12, cy: 8.5, r: 3.5 }], ["path", { d: "M5 19.5c1.3-3.4 4-5 7-5s5.7 1.6 7 5" }]],
   calendar: [["rect", { x: 3.5, y: 5.5, width: 17, height: 15, rx: 3 }], ["path", { d: "M3.5 10h17M8 3.5v4M16 3.5v4" }]],
   palette: [["circle", { cx: 12, cy: 12, r: 8.5 }], ["circle", { cx: 12, cy: 12, r: 3.5 }]],
-  gear: [["circle", { cx: 12, cy: 12, r: 3 }], ["path", { d: "M12 4v2.5m0 11V20M4 12h2.5m11 0H20M6.2 6.2l1.8 1.8m8 8l1.8 1.8M17.8 6.2L16 8M8 16l-1.8 1.8" }]],
+  gear: [["path", { d: "M4 7h8M17 7h3M4 17h3M12 17h8" }], ["circle", { cx: 14.5, cy: 7, r: 2 }], ["circle", { cx: 9.5, cy: 17, r: 2 }]],
   sun: [["circle", { cx: 12, cy: 12, r: 4 }], ["path", { d: "M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" }]],
   moon: [["path", { d: "M19.5 13.5A8 8 0 1 1 10.5 4.5 6.5 6.5 0 0 0 19.5 13.5z" }]],
   inbox: [["path", { d: "M4 13.5l3.5-8h9l3.5 8v5.5H4z" }], ["path", { d: "M4 13.5h5l1 2h4l1-2h5" }]],
