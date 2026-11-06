@@ -1,0 +1,13 @@
+Mailway —— 第三方组件声明
+==========================
+
+本项目主体代码为原创，以 MIT 许可发布（见 LICENSE）。以下第三方组件随仓库
+以源码形式分发，保留其各自许可与归属：
+
+* vendor/imap-proto —— imap-proto 0.10.2（rust-imap 项目）的打补丁副本。
+  许可：MIT OR Apache-2.0（© rust-imap contributors）。
+  原始许可文本：vendor/imap-proto/LICENSE-MIT、vendor/imap-proto/LICENSE-APACHE。
+  补丁说明：vendor/imap-proto/PATCH-NOTES.md。
+
+其余依赖经 crates.io / npm 正常分发，许可信息见各包自身元数据
+（`cargo license` 可汇总）。

@@ -180,6 +180,8 @@ cargo fmt --check        # formatting
 
 [MIT](LICENSE) © 2026 XiYeMing
 
+Third-party components (vendored `imap-proto`, etc.) keep their own licenses. See [NOTICE](NOTICE).
+
 This is an independently developed open-source project, not affiliated with any
 email provider. When using Gmail sign-in, please follow the Google API Services
 Policy and use your own OAuth credentials.

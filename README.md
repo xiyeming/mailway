@@ -175,5 +175,7 @@ cargo fmt --check        # 格式
 
 [MIT](LICENSE) © 2026 XiYeMing
 
+第三方组件（vendored `imap-proto` 等）保留各自许可，详见 [NOTICE](NOTICE)。
+
 本项目是独立开发的开源软件，与任何第三方邮箱服务商无关；使用 Gmail 登录时
 请遵守 Google API 服务条款，OAuth 凭据请使用你自己的。

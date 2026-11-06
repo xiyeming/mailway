@@ -1,6 +1,7 @@
 # imap-proto 0.10.2（vendored + 补丁）
 
 - **来源**：crates.io 的 `imap-proto` 0.10.2（`imap` 2.4.1 的传递依赖）。
+- **许可**：MIT OR Apache-2.0（© rust-imap contributors），原始 license 文本随附在本目录（LICENSE-MIT / LICENSE-APACHE）。
 - **许可证**：MIT / Apache-2.0（与上游一致）。
 - **为什么 vendor**：上游 0.10.2 的响应解析器不认识**未知无标签扩展行**——
   典型是 RFC 2971 的 `* ID (...)`（163/126 邮箱要求客户端发 `ID` 声明身份，
