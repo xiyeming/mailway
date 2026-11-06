@@ -4532,3 +4532,72 @@ button.thread-item:hover {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
 }
+
+
+/* ================================================================ D2 精修
+   逐项对齐样张数值（截图走查：头像形状/字号/徽标/密度四类差距）。 */
+
+/* 头像：样张是**圆角方形** 35px/10px，不是圆 */
+.avatar {
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+/* 行内字阶：from 13/700 · subject 12.5 · preview 11 · date 10.5 */
+.row-l1 .from {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.row .subject {
+  font-size: 12.5px;
+}
+
+.row .preview {
+  font-size: 11px;
+}
+
+.row-l1 .date {
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
+
+/* 徽标小巧化 */
+.thread-count {
+  font-size: 9.5px;
+  padding: 1px 7px;
+}
+
+/* 行密度：样张 11px 内距 + 4px 间隙 */
+.row {
+  padding: 11px 14px;
+}
+
+#messages {
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+/* 列表头收一档 */
+#list-title {
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.pane-head .muted {
+  font-size: 11px;
+}
+
+/* 侧栏行：13px / 图标 16px（样张值） */
+.side-row {
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
+.side-icon {
+  width: 16px;
+  height: 16px;
+}
