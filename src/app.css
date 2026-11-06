@@ -4601,3 +4601,79 @@ button.thread-item:hover {
   width: 16px;
   height: 16px;
 }
+
+
+/* ================================================================ D2 精修二
+   与样张并排 diff 的六处差距（计数/阅读面板/呼吸/顶栏线/图标/行距）。 */
+
+/* ① 侧栏计数：样张是**纯文本**，不是胶囊徽标 */
+.side-count {
+  background: transparent;
+  color: var(--fg-faint);
+  font-weight: 500;
+  padding: 0;
+  min-width: 0;
+}
+
+.side-row.is-active .side-count {
+  background: transparent;
+  color: var(--accent-fg);
+}
+
+/* ② 阅读区：样张是浮起的圆角灰面板（空态灰上灰、阅读白卡） */
+.reader {
+  background: var(--panel-2);
+  padding: 14px;
+}
+
+.reader .empty {
+  background: var(--card-sel);
+  border: 0;
+  border-radius: 14px;
+  height: 100%;
+}
+
+.reader .mail-subject {
+  padding: 4px 10px 10px;
+}
+
+.thread-stack {
+  background: var(--bg);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+/* ③ 行呼吸：样张 13px/18px */
+.row {
+  padding: 13px 18px;
+}
+
+#messages {
+  padding: 2px 12px;
+  gap: 4px;
+}
+
+/* ④ 顶栏去线（D2 不画线） */
+.pane-head {
+  border-bottom: 0;
+}
+
+/* ⑤ 图标加大加粗（样张的敦实感） */
+.ic-svg {
+  stroke-width: 2.1;
+}
+
+.rail-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.side-icon {
+  width: 17px;
+  height: 17px;
+}
+
+/* ⑥ 侧栏行距（样张 8px/12px） */
+.side-row {
+  padding: 8px 12px;
+}
