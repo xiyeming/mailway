@@ -295,13 +295,13 @@ function renderRail() {
   return node(
     "nav",
     { class: "rail", "aria-label": "主导航" },
-    railBtn("mail", "✉", "邮件"),
-    railBtn("contacts", "👤", "联系人"),
+    railBtn("mail", "mail", "邮件"),
+    railBtn("contacts", "users", "联系人"),
     // 「启用日历」关掉就不出这个入口（设置→日历）
-    state.settings?.enable_calendar !== "off" ? railBtn("calendar", "📅", "日历") : null,
+    state.settings?.enable_calendar !== "off" ? railBtn("calendar", "calendar", "日历") : null,
     themeBtn(),
     node("div", { class: "rail-spacer" }),
-    railBtn("settings", "⚙", "设置"),
+    railBtn("settings", "gear", "设置"),
   );
 }
 
@@ -317,7 +317,7 @@ function themeBtn() {
       "aria-label": "切换主题",
       onclick: toggleTheme,
     },
-    node("span", { class: "rail-icon rail-theme-icon", "aria-hidden": "true", text: dark ? "☀" : "🌙" }),
+    svgIcon(dark ? "sun" : "moon", "rail-icon rail-theme-icon"),
     node("span", { class: "rail-label", text: "主题" }),
   );
 }
@@ -337,7 +337,9 @@ function toggleTheme() {
     /* 存不了也不影响本次会话 */
   }
   const icon = document.querySelector(".rail-theme-icon");
-  if (icon) icon.textContent = next === "dark" ? "☀" : "🌙";
+  if (icon && icon.parentElement) {
+    icon.replaceWith(svgIcon(next === "dark" ? "sun" : "moon", "rail-icon rail-theme-icon"));
+  }
 }
 
 function railBtn(mode, icon, label) {
@@ -351,7 +353,7 @@ function railBtn(mode, icon, label) {
       "aria-current": state.mode === mode ? "page" : "false",
       onclick: () => switchMode(mode),
     },
-    node("span", { class: "rail-icon", "aria-hidden": "true", text: icon }),
+    svgIcon(icon, "rail-icon"),
     node("span", { class: "rail-label", text: label }),
   );
 }
@@ -611,17 +613,17 @@ async function deleteActiveAccount() {
 // ---- 侧栏：快捷文件夹 + 账号文件夹树（对照参考图） --------------------
 
 const QUICK = [
-  { filter: "inbox", icon: "📥", name: "所有收件箱", countKey: "inbox_unread" },
-  { filter: "unread", icon: "✉️", name: "所有未读", countKey: "all_unread" },
-  { filter: "flagged", icon: "★", name: "所有标星", countKey: "all_flagged" },
-  { filter: "drafts", icon: "📄", name: "所有草稿箱", countKey: "all_drafts", isDrafts: true },
-  { filter: "sent", icon: "📤", name: "所有已发送", countKey: "all_sent_unread" },
+  { filter: "inbox", icon: "inbox", name: "所有收件箱", countKey: "inbox_unread" },
+  { filter: "unread", icon: "envelope", name: "所有未读", countKey: "all_unread" },
+  { filter: "flagged", icon: "star", name: "所有标星", countKey: "all_flagged" },
+  { filter: "drafts", icon: "doc", name: "所有草稿箱", countKey: "all_drafts", isDrafts: true },
+  { filter: "sent", icon: "send", name: "所有已发送", countKey: "all_sent_unread" },
 ];
 const ACCOUNT_SMART = [
-  { filter: "unread", icon: "✉️", name: "未读邮件" },
-  { filter: "flagged", icon: "★", name: "标星邮件" },
+  { filter: "unread", icon: "envelope", name: "未读邮件" },
+  { filter: "flagged", icon: "star", name: "标星邮件" },
 ];
-const FOLDER_ICON = { inbox: "📥", sent: "📤", drafts: "📄", junk: "🗑", trash: "🗑", archive: "📦", normal: "📁" };
+const FOLDER_ICON = { inbox: "inbox", sent: "send", drafts: "doc", junk: "spam", trash: "trash", archive: "archive", normal: "folder" };
 
 function sidebarRow({ key, icon, name, count = 0, onclick, ctx, depth = 0, hasKids = false, collapsed = false, ontoggle = null }) {
   return node(
@@ -648,7 +650,7 @@ function sidebarRow({ key, icon, name, count = 0, onclick, ctx, depth = 0, hasKi
           },
         })
       : node("span", { class: "side-caret is-empty", "aria-hidden": "true" }),
-    node("span", { class: "side-icon", text: icon }),
+    typeof icon === "string" && ICONS[icon] ? svgIcon(icon, "side-icon") : node("span", { class: "side-icon", text: icon }),
     node("span", { class: "side-name", text: name }),
     count > 0 ? node("span", { class: "side-count", text: String(count) }) : null,
   );
@@ -3642,6 +3644,46 @@ function renderTranslateSettings(content) {
       status,
     );
   })();
+}
+
+// ================================================================= 线条图标库
+//
+// 2px 圆头描边（D2 · 无边留白风格）。图标一律走这里，不再用 emoji——
+// emoji 在不同平台渲染不一致，而且「emoji 堆砌」正是要去掉的 AI 味。
+// 构造走 createElementNS：**不碰 innerHTML**（全项目只有两处，见 dom.js）。
+
+const ICONS = {
+  mail: [["rect", { x: 3, y: 5, width: 18, height: 14, rx: 3 }], ["path", { d: "M3.5 8l8.5 5.5L20.5 8" }]],
+  users: [["circle", { cx: 12, cy: 8.5, r: 3.5 }], ["path", { d: "M5 19.5c1.3-3.4 4-5 7-5s5.7 1.6 7 5" }]],
+  calendar: [["rect", { x: 3.5, y: 5.5, width: 17, height: 15, rx: 3 }], ["path", { d: "M3.5 10h17M8 3.5v4M16 3.5v4" }]],
+  palette: [["circle", { cx: 12, cy: 12, r: 8.5 }], ["circle", { cx: 12, cy: 12, r: 3.5 }]],
+  gear: [["circle", { cx: 12, cy: 12, r: 3 }], ["path", { d: "M12 4v2.5m0 11V20M4 12h2.5m11 0H20M6.2 6.2l1.8 1.8m8 8l1.8 1.8M17.8 6.2L16 8M8 16l-1.8 1.8" }]],
+  sun: [["circle", { cx: 12, cy: 12, r: 4 }], ["path", { d: "M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" }]],
+  moon: [["path", { d: "M19.5 13.5A8 8 0 1 1 10.5 4.5 6.5 6.5 0 0 0 19.5 13.5z" }]],
+  inbox: [["path", { d: "M4 13.5l3.5-8h9l3.5 8v5.5H4z" }], ["path", { d: "M4 13.5h5l1 2h4l1-2h5" }]],
+  envelope: [["rect", { x: 3.5, y: 5.5, width: 17, height: 13, rx: 3 }], ["path", { d: "M4 8l8 5 8-5" }]],
+  star: [["path", { d: "M12 4l2.4 5.2 5.6.7-4.2 3.9 1.1 5.7L12 16.8l-4.9 2.7 1.1-5.7L4 9.9l5.6-.7z" }]],
+  doc: [["path", { d: "M7 3.5h7l4 4v13H7z" }], ["path", { d: "M14 3.5v4h4M9.5 12h6M9.5 15.5h6" }]],
+  send: [["path", { d: "M4 12l3.5-7h9l3.5 7v7H4z" }], ["path", { d: "M4 12h16" }]],
+  folder: [["path", { d: "M3.5 6.5h6l2 2h9v10h-17z" }]],
+  trash: [["path", { d: "M5.5 7.5h13l-1 11.5H6.5z" }], ["path", { d: "M9 7.5v-3h6v3" }]],
+  spam: [["path", { d: "M5.5 7.5h13l-1 11.5H6.5z" }], ["path", { d: "M9 7.5v-3h6v3M9.5 11.5v4M14.5 11.5v4" }]],
+  archive: [["rect", { x: 3.5, y: 4.5, width: 17, height: 5, rx: 1.5 }], ["path", { d: "M5 9.5v10h14v-10M9.5 13.5h5" }]],
+  search: [["circle", { cx: 11, cy: 11, r: 6.5 }], ["path", { d: "M16 16l4.5 4.5" }]],
+};
+
+/** 造一个线条图标（24px 视口、2px 圆头描边、随文字着色）。 */
+function svgIcon(name, cls) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", cls ? `ic-svg ${cls}` : "ic-svg");
+  svg.setAttribute("aria-hidden", "true");
+  for (const [tag, attrs] of ICONS[name] || []) {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+    svg.append(el);
+  }
+  return svg;
 }
 
 const SETTINGS_SECTIONS = [
