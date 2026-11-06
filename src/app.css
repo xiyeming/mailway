@@ -4773,25 +4773,63 @@ input[type="search"]:focus-visible {
 }
 
 
-/* ================================================================ 栏宽拖拽
-   分隔条压在面板右缘 7px 热区；hover/拖动时显一档灰提示可拖。 */
+/* ================================================================ 栏宽拉手
+   方案A「胶囊握把」：缝上悬浮竖胶囊（双握纹），离滚动条一档、按住左右拖。
+   hover 浮起加深；拖动中加阴影。走 CSSOM 不碰 CSP。 */
 .pane {
   position: relative;
 }
 
 .pane-split {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  right: -3px;
-  width: 7px;
+  top: 50%;
+  right: -8px;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 52px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
   cursor: col-resize;
   z-index: 60;
   touch-action: none;
-  border-radius: 4px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.pane-split:hover,
+/* 双握纹 */
+.pane-split::before,
+.pane-split::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 18px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--fg-faint) 55%, var(--bg));
+  transform: translateY(-50%);
+  transition: background 120ms ease;
+}
+
+.pane-split::before {
+  left: 3.5px;
+}
+
+.pane-split::after {
+  right: 3.5px;
+}
+
+.pane-split:hover {
+  border-color: color-mix(in srgb, var(--fg-faint) 55%, var(--bg));
+  box-shadow: 0 3px 12px rgb(0 0 0 / 16%);
+}
+
+.pane-split:hover::before,
+.pane-split:hover::after {
+  background: var(--fg-muted);
+}
+
 .pane-split.is-drag {
-  background: var(--bg-active);
+  border-color: var(--fg-faint);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
 }
