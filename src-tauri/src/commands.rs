@@ -1028,6 +1028,165 @@ fn delete_message_remote(store: &Store, pool: &ConnPool<Conn>, folder_id: i64, u
     })
 }
 
+// ================================================================= 通知 / 翻译
+
+/// 「测试通知」按钮：发一条真实系统通知，验证通知链路。
+#[tauri::command(rename_all = "snake_case")]
+pub fn send_test_notification(state: State<'_, AppState>) -> Result<(), String> {
+    let on = |key: &str, default_on: bool| -> bool {
+        match state.store.get_setting(key) {
+            Ok(Some(v)) => v != "off",
+            _ => default_on,
+        }
+    };
+    let mut note = notify_rust::Notification::new();
+    note.summary("Mailway 测试通知")
+        .appname("mailway")
+        .body("如果你看到这条弹窗，通知链路工作正常 ✔");
+    if on("notify_sound", true) {
+        note.hint(notify_rust::Hint::SoundName("message-new-instant".into()));
+    } else {
+        note.hint(notify_rust::Hint::SuppressSound(true));
+    }
+    note.show()
+        .map(|_| ())
+        .map_err(|err| format!("通知发送失败：{err}（桌面通知服务是否在运行？）"))
+}
+
+// ---- AI 翻译 ----------------------------------------------------------
+//
+// 走 **OpenAI 兼容** `chat/completions`：OpenAI / DeepSeek / SiliconFlow /
+// 自定义网关都认。API key 只进 keyring（同授权码规矩），settings 里只存
+// 「有没有配」。提示词模板含 `{lang}` 占位，用户可改。
+
+const TRANSLATE_KEYRING_KEY: &str = "translate_api_key";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TranslateSettings {
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub prompt: String,
+    pub target: String,
+    /// 只读信号：keyring 里有没有 key。保存时填了才更新。
+    pub has_key: bool,
+    /// 保存请求里带；返回时永远空。
+    #[serde(default)]
+    pub api_key: String,
+}
+
+impl Default for TranslateSettings {
+    fn default() -> Self {
+        Self {
+            provider: "openai".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            model: "gpt-4o-mini".into(),
+            prompt: "你是一名专业翻译。把用户提供的内容翻译成{lang}。只输出译文本身，不要任何解释。".into(),
+            target: "英语".into(),
+            has_key: false,
+            api_key: String::new(),
+        }
+    }
+}
+
+fn load_translate(store: &mailway_core::store::Store) -> TranslateSettings {
+    let get = |k: &str| store.get_setting(k).ok().flatten();
+    let mut t = TranslateSettings::default();
+    if let Some(v) = get("translate_provider") { t.provider = v; }
+    if let Some(v) = get("translate_base_url") { t.base_url = v; }
+    if let Some(v) = get("translate_model") { t.model = v; }
+    if let Some(v) = get("translate_prompt") { t.prompt = v; }
+    if let Some(v) = get("translate_target") { t.target = v; }
+    t.has_key = keyring::Entry::new(crate::secrets::SERVICE, TRANSLATE_KEYRING_KEY)
+        .and_then(|e| e.get_password())
+        .is_ok();
+    t.api_key = String::new();
+    t
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_translate_settings(state: State<'_, AppState>) -> Result<TranslateSettings, String> {
+    Ok(load_translate(&state.store))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn save_translate_settings(
+    state: State<'_, AppState>,
+    input: TranslateSettings,
+) -> Result<TranslateSettings, String> {
+    let set = |k: &str, v: &str| state.store.set_setting(k, v).map_err(e);
+    set("translate_provider", &input.provider)?;
+    set("translate_base_url", &input.base_url)?;
+    set("translate_model", &input.model)?;
+    set("translate_prompt", &input.prompt)?;
+    set("translate_target", &input.target)?;
+    // key 不进 settings；填了才写 keyring（留空 = 保持不变）
+    if !input.api_key.trim().is_empty() {
+        keyring::Entry::new(crate::secrets::SERVICE, TRANSLATE_KEYRING_KEY)
+            .and_then(|e| e.set_password(input.api_key.trim()))
+            .map_err(|err| format!("钥匙串写入失败：{err}"))?;
+    }
+    Ok(load_translate(&state.store))
+}
+
+/// AI 翻译一段文本。`target` 是语言显示名（如「英语」），代入提示词 `{lang}`。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn translate_text(
+    state: State<'_, AppState>,
+    text: String,
+    target: String,
+) -> Result<String, String> {
+    let store = std::sync::Arc::clone(&state.store);
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = load_translate(&store);
+        if !cfg.has_key {
+            return Err("还没配置翻译 API 密钥（设置 → 翻译）".to_string());
+        }
+        if text.trim().is_empty() {
+            return Err("没有可翻译的内容".to_string());
+        }
+        // 大邮件截断：chat 接口有上下文上限，宁可翻个开头也别整段 413
+        let body_text: String = text.chars().take(12000).collect();
+        let key = keyring::Entry::new(crate::secrets::SERVICE, TRANSLATE_KEYRING_KEY)
+            .and_then(|e| e.get_password())
+            .map_err(|err| format!("钥匙串读取失败：{err}"))?;
+        let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
+        let payload = serde_json::json!({
+            "model": cfg.model,
+            "messages": [
+                { "role": "system", "content": cfg.prompt.replace("{lang}", &target) },
+                { "role": "user", "content": body_text },
+            ],
+        });
+        let resp = ureq::post(&url)
+            .set("Authorization", &format!("Bearer {key}"))
+            .set("Content-Type", "application/json")
+            .send_string(&payload.to_string());
+        let resp = match resp {
+            Ok(r) => r,
+            Err(ureq::Error::Status(code, r)) => {
+                let detail = r.into_string().unwrap_or_default();
+                let detail: String = detail.chars().take(300).collect();
+                return Err(format!("翻译服务返回 {code}：{detail}"));
+            }
+            Err(err) => return Err(format!("连不上翻译服务：{err}")),
+        };
+        let raw = resp
+            .into_string()
+            .map_err(|err| format!("读响应失败：{err}"))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&raw).map_err(|err| format!("响应不是 JSON：{err}"))?;
+        json.pointer("/choices/0/message/content")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "翻译响应里没有内容（检查模型名是否正确）".to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 // ================================================================= 写信
 
 /// 本机字体列表（fontconfig `fc-list`）。失败返回空，前端用内置兜底。

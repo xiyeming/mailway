@@ -4164,3 +4164,72 @@ textarea.folder-input:focus-visible {
   box-shadow: var(--sh-md);
   font-size: var(--fs-md);
 }
+
+
+/* ================================================================ AI 翻译面板 */
+.translate-panel {
+  width: min(32rem, 92vw);
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.translate-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-md);
+}
+
+.translate-head .custom-select-wrap {
+  width: 15rem;
+  margin-left: auto;
+}
+
+.translate-langs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.translate-result {
+  min-height: 5rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-sunken);
+  font-size: var(--fs-md);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.translate-result:empty {
+  display: none;
+}
+
+.translate-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.translate-foot .dialog-status {
+  flex: 1;
+}
+
+.settings-block {
+  display: grid;
+}
+
+
+.setting-info {
+  min-width: 0;
+}
+
+.setting-ctl {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}

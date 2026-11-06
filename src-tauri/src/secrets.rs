@@ -23,7 +23,7 @@ use mailway_core::error::{Error, Result};
 use mailway_core::store::Store;
 use mailway_core::types::Account;
 
-const SERVICE: &str = "org.mailway.app";
+pub const SERVICE: &str = "org.mailway.app";
 
 /// 取某个账号的授权码。
 ///

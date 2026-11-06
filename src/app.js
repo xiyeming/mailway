@@ -2464,9 +2464,131 @@ function renderReaderActions(s) {
       text: s.pinned ? "📌 已置顶" : "📌 置顶",
       onclick: () => togglePin(s.id),
     }),
+    node("button", {
+      class: "ra-btn", type: "button", text: "🌐 译", title: "AI 翻译这封邮件",
+      onclick: (e) => openTranslatePanel(e.currentTarget, s),
+    }),
     organizeMenu(s),
     moreMenu(s),
   );
+}
+
+/** 读信「译」面板：快捷语言 + 厂商快切 + 译文 + 复制。 */
+function openTranslatePanel(anchor, s) {
+  closeAllMenus();
+  if (openMore) closeMore();
+  const overlay = node("div", { class: "menu-overlay", role: "presentation" });
+  overlay.addEventListener("mousedown", (ev) => {
+    if (ev.target === overlay) overlay.remove();
+  });
+  const panel = node("div", { class: "more-menu translate-panel is-fixed", role: "dialog", "aria-label": "翻译" });
+  panel.addEventListener("click", (ev) => ev.stopPropagation());
+
+  const status = node("p", { class: "dialog-status", text: "" });
+  const result = node("div", { class: "translate-result", text: "" });
+  let cfg = null;
+  let lastLang = null;
+
+  const providerSel = customSelect(TRANSLATE_PROVIDERS.map(([id, name]) => [id, name]), "openai", async (v) => {
+    // 厂商快切：带出默认地址/模型存好，再重翻
+    const preset = TRANSLATE_PROVIDERS.find(([id]) => id === v);
+    if (cfg && preset) {
+      cfg = await invoke("save_translate_settings", {
+        input: {
+          provider: v,
+          base_url: preset[2] || cfg.base_url,
+          model: preset[3] || cfg.model,
+          prompt: cfg.prompt,
+          target: cfg.target,
+          api_key: "",
+          has_key: cfg.has_key,
+        },
+      });
+    }
+    if (lastLang) doTranslate(lastLang);
+  });
+
+  const langRow = node("div", { class: "translate-langs" },
+    ...TRANSLATE_LANGS.map((l) =>
+      node("button", {
+        class: "subject-chip", type: "button", text: l,
+        onclick: () => doTranslate(l),
+      })),
+  );
+
+  async function doTranslate(lang) {
+    lastLang = lang;
+    const text = (state.detail?.body_text || "").trim();
+    if (!text) {
+      status.textContent = "这封信没有可翻译的文本";
+      return;
+    }
+    status.textContent = `正在翻译为${lang}…`;
+    status.classList.remove("is-error");
+    try {
+      if (!cfg) cfg = await invoke("get_translate_settings");
+      if (!cfg.has_key) {
+        status.textContent = "还没配置翻译 API —— 设置 → 翻译";
+        status.classList.add("is-error");
+        return;
+      }
+      providerSel.value = cfg.provider;
+      const out = await invoke("translate_text", { text, target: lang });
+      result.textContent = out;
+      status.textContent = `已翻译为${lang}（${cfg.model}）`;
+    } catch (err) {
+      status.textContent = `翻译失败：${err instanceof Error ? err.message : err}`;
+      status.classList.add("is-error");
+    }
+  }
+
+  panel.append(
+    node("div", { class: "translate-head" },
+      node("strong", { text: "译为" }),
+      providerSel.el,
+    ),
+    langRow,
+    result,
+    node("div", { class: "translate-foot" },
+      status,
+      node("button", {
+        class: "btn btn-sm", type: "button", text: "复制译文",
+        onclick: async () => {
+          if (!result.textContent) return;
+          try {
+            await navigator.clipboard.writeText(result.textContent);
+            status.textContent = "已复制";
+          } catch {
+            status.textContent = "复制失败（浏览器权限）";
+          }
+        },
+      }),
+    ),
+  );
+
+  // 贴按钮下方、不出屏（复用右键菜单的碰撞检测思路）
+  overlay.append(panel);
+  document.body.append(overlay);
+  const r = anchor.getBoundingClientRect();
+  const p = panel.getBoundingClientRect();
+  let x = Math.max(8, Math.min(r.left, window.innerWidth - p.width - 8));
+  let y = r.bottom + 6;
+  if (y + p.height > window.innerHeight - 8) {
+    y = Math.max(8, r.top - p.height - 6);
+  }
+  panel.style.left = `${Math.round(x)}px`;
+  panel.style.top = `${Math.round(y)}px`;
+
+  // 默认语种即点即翻
+  (async () => {
+    try {
+      cfg = await invoke("get_translate_settings");
+      providerSel.value = cfg.provider;
+      doTranslate(cfg.target || "英语");
+    } catch {
+      status.textContent = "读取翻译设置失败";
+    }
+  })();
 }
 
 /** 「更多▾」下拉。全项目同一时刻只留一个开着的菜单（`openMore`）。 */
@@ -3395,12 +3517,124 @@ async function removeEvent(id) {
 
 // // ================================================================= 设置（M5/M6）
 
+// ================================================================= AI 翻译
+//
+// 走 OpenAI 兼容 chat/completions（OpenAI/DeepSeek/SiliconFlow/自定义都认）。
+// 提示词模板带 {lang} 占位；API key 存 keyring（设置里只显示有没有配）。
+
+const TRANSLATE_LANGS = ["中文", "英语", "日语", "韩语", "法语", "德语", "俄语", "西班牙语", "葡萄牙语", "意大利语"];
+
+/** [id, 名称, 默认地址, 默认模型]——选厂商自动带出地址/模型，可改。 */
+const TRANSLATE_PROVIDERS = [
+  ["openai", "OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"],
+  ["deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"],
+  ["siliconflow", "SiliconFlow", "https://api.siliconflow.cn/v1", "Qwen/Qwen2.5-7B-Instruct"],
+  ["custom", "自定义（OpenAI 兼容）", "", ""],
+];
+
+/** 设置 → 翻译。整块异步填充（要拉 get_translate_settings）。 */
+function renderTranslateSettings(content) {
+  content.append(
+    node("h2", { class: "settings-title", text: "翻译" }),
+    node("p", { class: "muted", text: "AI 翻译邮件正文。走 OpenAI 兼容接口，密钥只存系统钥匙串。" }),
+    node("div", { class: "settings-block", id: "translate-form" }, node("p", { class: "muted", text: "加载中…" })),
+  );
+  const box = content.querySelector("#translate-form");
+  (async () => {
+    let cfg;
+    try {
+      cfg = await invoke("get_translate_settings");
+    } catch {
+      clear(box).append(node("p", { class: "muted", text: "读取设置失败" }));
+      return;
+    }
+    const status = node("p", { class: "dialog-status", text: cfg.has_key ? "已配置 API 密钥" : "还没配置 API 密钥" });
+    const providerSel = customSelect(
+      TRANSLATE_PROVIDERS.map(([id, name]) => [id, name]),
+      cfg.provider,
+      (v) => {
+        const preset = TRANSLATE_PROVIDERS.find(([id]) => id === v);
+        if (preset && preset[2]) baseUrl.value = preset[2];
+        if (preset && preset[3]) model.value = preset[3];
+      },
+    );
+    const baseUrl = node("input", { class: "form-input", type: "text", value: cfg.base_url, placeholder: "https://api.openai.com/v1" });
+    const model = node("input", { class: "form-input", type: "text", value: cfg.model, placeholder: "gpt-4o-mini" });
+    const apiKey = node("input", {
+      class: "form-input", type: "password", value: "",
+      placeholder: cfg.has_key ? "已配置（留空保持不变）" : "sk-…",
+    });
+    const prompt = node("textarea", {
+      class: "form-input", rows: "3",
+      text: cfg.prompt,
+      placeholder: "{lang} 会被替换成目标语言",
+    });
+    const targetSel = customSelect(
+      TRANSLATE_LANGS.map((l) => [l, l]),
+      cfg.target,
+      () => {},
+    );
+    const save = async (quiet = false) => {
+      try {
+        cfg = await invoke("save_translate_settings", {
+          input: {
+            provider: providerSel.value,
+            base_url: baseUrl.value.trim(),
+            model: model.value.trim(),
+            prompt: prompt.value,
+            target: targetSel.value,
+            api_key: apiKey.value,
+            has_key: cfg.has_key,
+          },
+        });
+        apiKey.value = "";
+        status.textContent = cfg.has_key ? "已配置 API 密钥" : "还没配置 API 密钥";
+        if (!quiet) statusNote("翻译设置已保存");
+      } catch (err) {
+        status.textContent = `保存失败：${err instanceof Error ? err.message : err}`;
+      }
+    };
+    const testBtn = node("button", {
+      class: "btn btn-primary", type: "button", text: "测试翻译",
+      onclick: async () => {
+        await save(true);
+        status.textContent = "翻译中…";
+        try {
+          const out = await invoke("translate_text", { text: "你好，世界。这是一条翻译测试。", target: targetSel.value });
+          status.textContent = `测试结果：${out}`;
+          status.classList.remove("is-error");
+        } catch (err) {
+          status.textContent = `失败：${err instanceof Error ? err.message : err}`;
+          status.classList.add("is-error");
+        }
+      },
+    });
+    clear(box).append(
+      settingRow("翻译厂商", "OpenAI 兼容接口都可接入", providerSel.el),
+      settingRow("API 地址", "…/v1 结尾（chat/completions 会拼在后面）", baseUrl),
+      settingRow("模型", "如 gpt-4o-mini / deepseek-chat", model),
+      settingRow("API 密钥", "只存系统钥匙串，不进配置文件", apiKey),
+      settingRow("提示词", "{lang} 会被替换成目标语言", prompt),
+      settingRow("默认目标语言", "读信「译」按钮的默认语种", targetSel.el),
+      node("div", { class: "setting-row" },
+        node("div", { class: "setting-info" }),
+        node("div", { class: "setting-ctl" },
+          node("button", { class: "btn", type: "button", text: "保存", onclick: () => save() }),
+          testBtn,
+        ),
+      ),
+      status,
+    );
+  })();
+}
+
 const SETTINGS_SECTIONS = [
   ["system", "系统设置"],
   ["notify", "邮件通知"],
   ["mailbox", "邮箱设置"],
   ["readwrite", "邮件读写"],
   ["calendar", "日历"],
+  ["translate", "翻译"],
   ["proxy", "代理设置"],
   ["about", "关于"],
 ];
@@ -3463,7 +3697,9 @@ function renderSettingsSection(content, id) {
   // 开关：on/off 存储
   const check = (k, d) => settingCheck(val(k, d) === "on", (on) => set(k, on ? "on" : "off"));
 
-  if (id === "system") {
+  if (id === "translate") {
+    renderTranslateSettings(content);
+  } else if (id === "system") {
     content.append(
       node("h2", { class: "settings-title", text: "系统设置" }),
       settingRow("开机自动运行", "登录系统后自动启动（XDG autostart）", autostartCheck()),
@@ -3479,6 +3715,20 @@ function renderSettingsSection(content, id) {
       settingRow("弹窗提醒", "收到新邮件时弹系统通知", check("notify_popup", "on")),
       settingRow("声音提醒", "新邮件到达时播放提示音", check("notify_sound", "on")),
       settingRow("弹窗显示发件人和主题", "通知里带发件人与主题", check("notify_show_sender", "on")),
+      settingRow("测试通知", "发一条测试弹窗，验证通知链路", node("button", {
+        class: "btn", type: "button", text: "发送测试通知",
+        onclick: async (ev) => {
+          const b = ev.currentTarget;
+          b.disabled = true;
+          try {
+            await invoke("send_test_notification");
+            statusNote("测试通知已发出");
+          } catch (err) {
+            statusNote(`发送失败：${err instanceof Error ? err.message : err}`);
+          }
+          b.disabled = false;
+        },
+      })),
     );
   } else if (id === "mailbox") {
     renderMailboxSettings(content, s);
@@ -3794,8 +4044,10 @@ function customSelect(options, current, onChange) {
     get value() {
       return cur;
     },
+    // 程序赋值**不**通知（同原生 select 语义）——只读回显用。
+    // 通知了就会「赋值 → onChange → 再翻译 → 再赋值」死循环（译面板踩过）。
     set value(v) {
-      setValue(v);
+      setValue(v, false);
     },
   };
 }
