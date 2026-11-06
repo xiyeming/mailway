@@ -2246,8 +2246,8 @@ button:focus-visible,
 }
 
 .from-caret {
-  color: var(--fg-faint);
-  font-size: var(--fs-sm);
+  color: var(--fg-muted);
+  font-size: var(--fs-md);
 }
 
 .compose-fields {
@@ -3204,11 +3204,13 @@ button:focus-visible,
   background: var(--bg-active);
 }
 
+/* 表单行比例（协调档）：文本列定宽 15rem（描述不再挤成两三行），
+   控件列限宽 30rem（输入框不再拉满全页——右重左轻的根因） */
 .setting-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 30rem);
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: 1.5rem;
   padding: 0.85rem 0;
   border-bottom: 1px solid var(--line);
 }
@@ -4133,8 +4135,8 @@ textarea.folder-input:focus-visible {
 
 .custom-select .cs-caret {
   flex-shrink: 0;
-  color: var(--fg-faint);
-  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  font-size: var(--fs-icon);
 }
 
 .more-item.is-selected {

@@ -1589,11 +1589,27 @@ function batchMoveMenu(e) {
   }, targets);
 }
 
-/** 关掉所有浮层菜单（文件夹右键、邮件右键、移动选单）——开新菜单前先清场。 */
+/** 关掉所有浮层菜单：右键浮层 + **内联下拉**（自绘 select/⋯/插入/厂商…）+ 阅读页更多。
+ *  开新菜单前先清场；document 点外也走这里（下拉失焦不收的老问题）。 */
 function closeAllMenus() {
   closeFolderCtx();
+  closeMore();
   document.querySelectorAll(".menu-overlay").forEach((el) => el.remove());
+  document.querySelectorAll(".more-menu").forEach((m) => {
+    m.hidden = true;
+  });
+  document.querySelectorAll('[aria-haspopup="true"]').forEach((b) => {
+    b.setAttribute("aria-expanded", "false");
+  });
 }
+
+// 点**外面**任何地方收起全部浮层。toggle 按钮自己 stopPropagation / 带
+// aria-haspopup，菜单内点击不冒泡 —— 都跳过，交给各自处理器。
+document.addEventListener("click", (e) => {
+  const t = e.target;
+  if (t && t.closest && t.closest(".more-menu, .more-wrap, .menu-overlay, [aria-haspopup]")) return;
+  closeAllMenus();
+});
 
 /** 文件夹选单浮层（批量移动 / 右键「移动」共用）。 */
 function openMoveMenu(e, onPick, targets) {
