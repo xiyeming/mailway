@@ -14,7 +14,7 @@
 
 :root {
   --bg: #ffffff;
-  --bg-sunken: #f2f3fa;
+  --bg-sunken: #f4f4f5;
   --bg-hover: #f2f2f4;
   --bg-active: #ebebee;
   --fg: #1c2333;
@@ -4446,14 +4446,14 @@ input[type="search"] {
 }
 
 /* 头像：低饱和实色（不渐变） */
-.avatar-c0 { background: #5b6fc4; }
+.avatar-c0 { background: #6c72c9; }
 .avatar-c1 { background: #4c9a8e; }
 .avatar-c2 { background: #bd6482; }
-.avatar-c3 { background: #b58a3d; }
+.avatar-c3 { background: #8b7f63; }
 .avatar-c4 { background: #a5845c; }
 .avatar-c5 { background: #6e7f95; }
-.avatar-c6 { background: #c07878; }
-.avatar-c7 { background: #79915c; }
+.avatar-c6 { background: #b98a8a; }
+.avatar-c7 { background: #7a8fa6; }
 
 /* 阅读区：素底，无光晕 */
 .reader {
