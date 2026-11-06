@@ -184,6 +184,13 @@ function toggleAccountCollapse(id) {
   renderSidebar();
 }
 
+/** 改完已读/星标后刷新侧栏角标：计数是 smart_counts 聚合出来的，
+ *  不重新拉就会一直显示旧数（「全标已读」后角标不动的根因）。 */
+async function refreshCounts() {
+  await refreshSidebarData();
+  renderSidebar();
+}
+
 function toggleFolderCollapse(id) {
   if (state.collapsedFolders.has(id)) state.collapsedFolders.delete(id);
   else state.collapsedFolders.add(id);
@@ -974,7 +981,7 @@ async function smartMarkAllRead() {
     for (const m of state.messages) if (ids.includes(m.id)) m.flags.seen = true;
     repaintList();
     updateListCount();
-    renderSidebar();
+    await refreshCounts();
     renderReader();
     toast(`已标为已读 ${ids.length} 封`);
   } catch (err) {
@@ -1631,6 +1638,7 @@ async function batchSetFlags(seen, flagged) {
     updateListCount();
     renderSelectBar();
     renderReader();
+    await refreshCounts();
   } catch (err) {
     toast(`操作失败：${err instanceof Error ? err.message : err}`);
   }
@@ -2195,6 +2203,7 @@ async function quickMarkRead(thread, seen) {
   repaintList();
   updateListCount();
   if (state.detail && targets.some((x) => x.id === state.detail.summary.id)) renderReader();
+  await refreshCounts();
 }
 
 /** 列表头筛选图标：只看未读 / 看全部。就地切 class，不重画整个头部。 */
@@ -2263,6 +2272,8 @@ async function openMessage(messageId) {
       if (row) row.flags = flags;
       detail.summary.flags = flags;
       repaintList();
+      // 角标跟上（不阻塞阅读：后台刷）
+      refreshCounts().catch(() => {});
     }
 
     // 加载会话（同 thread_key，跨文件夹）—— 阅读页把同话题的信堆一起。
@@ -2876,6 +2887,7 @@ async function markUnread(messageId) {
   if (d && d.summary.id === messageId) d.summary.flags = flags;
   repaintList();
   updateListCount();
+  await refreshCounts();
   renderReader();
 }
 
@@ -3004,6 +3016,7 @@ async function toggleFlag(messageId) {
   if (row) row.flags = flags;
   if (d && d.summary.id === messageId) d.summary.flags = flags;
   repaintAfterMarks();
+  await refreshCounts();
 }
 
 async function togglePin(messageId) {
