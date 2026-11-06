@@ -15,7 +15,7 @@
 :root {
   --bg: #ffffff;
   --bg-sunken: #f4f4f5;
-  --bg-hover: #f2f2f4;
+  --bg-hover: #f6f6f8;
   --bg-active: #ebebee;
   --fg: #1c2333;
   --fg-muted: #59616e;
@@ -27,7 +27,7 @@
   --canvas: #f7f7f8;
   --panel-2: #fafafa;
   --card-line: #f0f0f2;
-  --card-sel: #ebebee;
+  --card-sel: #e2e2e7;
   --accent-fg: #ffffff;
   --danger: #b42318;
   --warn-bg: #fff8e6;
@@ -84,7 +84,7 @@
   color-scheme: dark;
   --bg: #171a20;
   --bg-sunken: #12141a;
-  --bg-hover: #242427;
+  --bg-hover: #232326;
   --bg-active: #2a2a2e;
   --fg: #e7eaf0;
   --fg-muted: #9aa4b2;
@@ -97,7 +97,7 @@
   --canvas: #121213;
   --panel-2: #17171a;
   --card-line: #232326;
-  --card-sel: #242428;
+  --card-sel: #2e2e34;
   --danger: #f0716a;
   --warn-bg: #2c2510;
   --warn-line: #4a3d1a;
@@ -4890,4 +4890,11 @@ input[type="search"]:focus-visible {
 
 .update-banner .ub-link:hover {
   color: var(--fg);
+}
+
+
+/* 选中行的主题加重一档——hover 和选中同时可见时，靠字重也能分辨 */
+.row.is-sel .subject,
+.row[aria-current="true"] .subject {
+  font-weight: 650;
 }
