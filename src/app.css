@@ -4753,3 +4753,21 @@ input[type="search"]:focus-visible {
   --canvas: var(--bg);
   --panel-2: var(--bg);
 }
+
+
+/* ================================================================ 去分割线
+   底部「横线」其实是横向滚动条：overflow-y:auto 的容器另一轴被强制 auto，
+   内容略宽就冒出一条 thumb。显式 overflow-x:hidden 根除。
+   右侧竖线是 .pane 的 border-right，统一色系后纯白上更显割裂——去掉。 */
+
+.folder-list {
+  overflow-x: hidden;
+}
+
+.pane {
+  border-right: 0;
+}
+
+.side-top {
+  border-bottom: 0;
+}
