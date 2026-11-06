@@ -347,16 +347,18 @@ impl<'s> SyncEngine<'s> {
         folder: &Folder,
         new_name: &str,
     ) -> Result<()> {
-        conn.rename_folder(&folder.display_name, new_name)?;
-        self.store
-            .rename_folder(folder.id, &crate::imap::utf7::encode(new_name), new_name)
+        let to_wire = rename_wire(&folder.imap_name, folder.delimiter, new_name);
+        conn.rename_folder_wire(&folder.imap_name, &to_wire)?;
+        self.store.rename_folder(folder.id, &to_wire, new_name)
     }
 
     /// 删文件夹。先服务器、后本地，理由同 [`Self::rename_folder`]。
     /// 本地是级联删（`messages.folder_id` 是 `ON DELETE CASCADE`）——
     /// 服务器上箱子没了，缓存的信留着也只是幽灵。
     pub fn delete_folder(&self, conn: &mut Conn, folder: &Folder) -> Result<()> {
-        conn.delete_folder(&folder.display_name)?;
+        // **wire 名删**：子文件夹显示名是叶子（「222」），服务器上的名字是
+        // 全路径（「已发邮件/111/222」）——拿显示名删会报「不存在」。
+        conn.delete_folder_wire(&folder.imap_name)?;
         self.store.delete_folder(folder.id)
     }
 
@@ -1013,5 +1015,41 @@ mod tests {
             guess_folder_kind("[Gmail]/Mailspring", "Mailspring"),
             FolderKind::Normal
         );
+    }
+}
+
+/// 改名后的 wire 名：叶子换新名（utf7），**父前缀原样保留**。
+/// 子文件夹直接对叶子编码会把「已发邮件/111/222」改成「222」——层级丢失。
+fn rename_wire(current_wire: &str, delimiter: Option<char>, new_display: &str) -> String {
+    let leaf = crate::imap::utf7::encode(new_display);
+    match delimiter {
+        Some(d) => match current_wire.rsplit_once(d) {
+            Some((parent_wire, _)) => format!("{parent_wire}{d}{leaf}"),
+            None => leaf,
+        },
+        None => leaf,
+    }
+}
+
+#[cfg(test)]
+mod rename_wire_tests {
+    use super::rename_wire;
+
+    #[test]
+    fn root_folder_renames_to_bare_wire() {
+        assert_eq!(rename_wire("Trash", Some('/'), "废纸篓"), crate::imap::utf7::encode("废纸篓"));
+    }
+
+    #[test]
+    fn subfolder_keeps_parent_prefix() {
+        // 「已发邮件/111/222」改名成「333」→ 父前缀保留
+        let out = rename_wire("Sent/111/222", Some('/'), "333");
+        assert_eq!(out, "Sent/111/333");
+    }
+
+    #[test]
+    fn nested_subfolder_encodes_leaf_only() {
+        let out = rename_wire("Sent/\u{2603}/x", Some('/'), "周报");
+        assert_eq!(out, format!("Sent/\u{2603}/{}", crate::imap::utf7::encode("周报")));
     }
 }

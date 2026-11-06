@@ -238,6 +238,25 @@ impl Conn {
     /// 改文件夹名。参数都是人看的名字，理由同 [`Self::create_folder`]。
     /// 子文件夹跟着一起改（服务器的语义）。INBOX 别调这个 —— 协议里改 INBOX
     /// 是「搬到新箱子、自己清空」的特殊操作，客户端没有这个交互。
+    /// 删/改文件夹的 **wire 名**版（不编码）——同 [`Self::create_folder_wire`]
+    /// 的不对称说明：库里 `imap_name` 就是 wire 名，子文件夹还带父前缀，
+    /// 拿 `display_name`（叶子名）去删/改会找错箱子。
+    pub fn delete_folder_wire(&mut self, wire_name: &str) -> Result<()> {
+        match &mut self.session {
+            AnySession::Plain(s) => s.delete(wire_name),
+            AnySession::Tls(s) => s.delete(wire_name),
+        }
+        .map_err(|e| Error::Imap(e.to_string()))
+    }
+
+    pub fn rename_folder_wire(&mut self, from_wire: &str, to_wire: &str) -> Result<()> {
+        match &mut self.session {
+            AnySession::Plain(s) => s.rename(from_wire, to_wire),
+            AnySession::Tls(s) => s.rename(from_wire, to_wire),
+        }
+        .map_err(|e| Error::Imap(e.to_string()))
+    }
+
     pub fn rename_folder(&mut self, from_display: &str, to_display: &str) -> Result<()> {
         let from = utf7::encode(from_display);
         let to = utf7::encode(to_display);
