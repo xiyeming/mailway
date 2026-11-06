@@ -11,6 +11,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Error)]
 pub enum Error {
     // ---------------------------------------------------------------- 协议层
+    #[error("代理错误: {0}")]
+    Proxy(String),
+
     #[error("IMAP 错误: {0}")]
     Imap(String),
 

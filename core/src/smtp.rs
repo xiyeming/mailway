@@ -314,7 +314,7 @@ impl Conn {
     /// 测试得传一个「接受自签」的 connector 进来才能真握手。
     pub fn connect_with(cfg: &Config, password: &str, connector: &TlsConnector, is_oauth: bool) -> Result<Self> {
         let addr = format!("{}:{}", cfg.host, cfg.port);
-        let tcp = TcpStream::connect(&addr)
+        let tcp = crate::proxy::connect(&cfg.host, cfg.port)
             .map_err(|e| Error::SmtpConnect(format!("连不上 {addr}: {e}")))?;
         // 超时得设在**升级 TLS 之前**，TlsStream 会继承底层 socket 的设置
         tcp.set_read_timeout(Some(IO_TIMEOUT)).ok();

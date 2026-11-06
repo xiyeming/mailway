@@ -3961,14 +3961,89 @@ async function setAccountEnabled(a, on) {
   }
 }
 
-/** 代理设置：类型 + 服务器/端口/账号密码（存起来，下次连接生效）。 */
+/** 代理设置：SOCKS5 / HTTP CONNECT，接进全部收发连接（IMAP/POP3/SMTP）。
+ *  密码存 keyring；保存即生效（不用重启）。 */
 function renderProxySettings(content, s) {
   content.append(node("h2", { class: "settings-title", text: "代理设置" }));
-  // 诚实占位：收发连接还没接代理（TCP 直连），配了也不会生效——不开假开关。
-  // 真做排下个迭代：SOCKS5/HTTP CONNECT 接进 core 的 TcpStream 建连。
   content.append(
-    settingRow("代理支持即将上线", "SOCKS5 / HTTP 代理接入收发连接开发中；现在配置不会生效，故暂不开放", null),
+    node("p", { class: "muted", text: "对全部收发连接生效（IMAP/POP3/SMTP）。只代理建连这一段，TLS 依旧端到端加密，代理看不到邮件内容。" }),
+    node("div", { class: "settings-block", id: "proxy-form" }, node("p", { class: "muted", text: "加载中…" })),
   );
+  const box = content.querySelector("#proxy-form");
+  (async () => {
+    let cfg;
+    try {
+      cfg = await invoke("get_proxy_settings");
+    } catch {
+      clear(box).append(node("p", { class: "muted", text: "读取设置失败" }));
+      return;
+    }
+    const status = node("p", { class: "dialog-status", text: "" });
+    const enable = settingCheck(cfg.enabled, (on) => {
+      cfg.enabled = on;
+    });
+    const kindSel = customSelect([["socks5", "SOCKS5"], ["http", "HTTP CONNECT"]], cfg.kind, () => {});
+    const host = node("input", { class: "form-input", type: "text", value: cfg.host, placeholder: "127.0.0.1" });
+    const port = node("input", { class: "form-input", type: "number", value: cfg.port, placeholder: "1080" });
+    const user = node("input", { class: "form-input", type: "text", value: cfg.username, placeholder: "可留空" });
+    const pass = node("input", {
+      class: "form-input", type: "password", value: "",
+      placeholder: cfg.has_password ? "已配置（留空保持不变）" : "可留空",
+    });
+    const save = async (quiet = false) => {
+      try {
+        cfg = await invoke("save_proxy_settings", {
+          input: {
+            enabled: cfg.enabled,
+            kind: kindSel.value,
+            host: host.value.trim(),
+            port: port.value.trim(),
+            username: user.value.trim(),
+            password: pass.value,
+            has_password: cfg.has_password,
+          },
+        });
+        pass.value = "";
+        status.textContent = cfg.has_password ? "已保存（密码已配置）" : "已保存";
+        status.classList.remove("is-error");
+        if (!quiet) statusNote("代理设置已保存并生效");
+      } catch (err) {
+        status.textContent = `保存失败：${err instanceof Error ? err.message : err}`;
+        status.classList.add("is-error");
+      }
+    };
+    const testBtn = node("button", {
+      class: "btn btn-primary", type: "button", text: "测试连接",
+      onclick: async () => {
+        await save(true);
+        status.textContent = "测试中…";
+        status.classList.remove("is-error");
+        try {
+          const out = await invoke("test_proxy", { host: "imap.163.com", port: 993 });
+          status.textContent = out;
+        } catch (err) {
+          status.textContent = `失败：${err instanceof Error ? err.message : err}`;
+          status.classList.add("is-error");
+        }
+      },
+    });
+    clear(box).append(
+      settingRow("启用代理", "关掉即直连", enable),
+      settingRow("代理类型", "SOCKS5（推荐）或 HTTP CONNECT", kindSel.el),
+      settingRow("服务器", "代理主机名或 IP", host),
+      settingRow("端口", "如 1080 / 7890", port),
+      settingRow("用户名", "需要认证才填", user),
+      settingRow("密码", "只存系统钥匙串，留空保持不变", pass),
+      node("div", { class: "setting-row" },
+        node("div", { class: "setting-info" }),
+        node("div", { class: "setting-ctl" },
+          node("button", { class: "btn", type: "button", text: "保存", onclick: () => save() }),
+          testBtn,
+        ),
+      ),
+      status,
+    );
+  })();
 }
 
 // ---- 设置控件 ----------------------------------------------------------

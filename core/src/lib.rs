@@ -24,6 +24,7 @@ pub mod error;
 pub mod imap;
 pub mod mime;
 pub mod pop3;
+pub mod proxy;
 pub mod rules;
 pub mod sanitize;
 pub mod send;

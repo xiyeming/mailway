@@ -1028,6 +1028,120 @@ fn delete_message_remote(store: &Store, pool: &ConnPool<Conn>, folder_id: i64, u
     })
 }
 
+// ================================================================= 代理
+
+/// 从设置装配代理（启动时 + 保存设置后调用）。密码在 keyring，设置里不存。
+pub fn apply_proxy_from_settings(store: &mailway_core::store::Store) {
+    use mailway_core::proxy::{ProxyConfig, ProxyKind};
+    let get = |k: &str| store.get_setting(k).ok().flatten().unwrap_or_default();
+    if get("proxy_on") != "on" {
+        mailway_core::proxy::set_global(None);
+        return;
+    }
+    let host = get("proxy_host");
+    let port: u16 = get("proxy_port").parse().unwrap_or(0);
+    if host.is_empty() || port == 0 {
+        mailway_core::proxy::set_global(None);
+        return;
+    }
+    let username = {
+        let u = get("proxy_user");
+        if u.is_empty() { None } else { Some(u) }
+    };
+    let password = keyring::Entry::new(crate::secrets::SERVICE, "proxy_password")
+        .and_then(|e| e.get_password())
+        .ok();
+    let kind = if get("proxy_type") == "http" {
+        ProxyKind::HttpConnect
+    } else {
+        ProxyKind::Socks5
+    };
+    mailway_core::proxy::set_global(Some(ProxyConfig {
+        kind,
+        host,
+        port,
+        username,
+        password,
+    }));
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProxySettings {
+    pub enabled: bool,
+    pub kind: String, // socks5 | http
+    pub host: String,
+    pub port: String,
+    pub username: String,
+    /// 保存时填；返回恒空。留空保持不变。
+    #[serde(default)]
+    pub password: String,
+    pub has_password: bool,
+}
+
+fn load_proxy_settings(state: &State<'_, AppState>) -> ProxySettings {
+    let get = |k: &str| state.store.get_setting(k).ok().flatten().unwrap_or_default();
+    let has_password = keyring::Entry::new(crate::secrets::SERVICE, "proxy_password")
+        .and_then(|e| e.get_password())
+        .is_ok();
+    ProxySettings {
+        enabled: get("proxy_on") == "on",
+        kind: if get("proxy_type") == "http" { "http".into() } else { "socks5".into() },
+        host: get("proxy_host"),
+        port: get("proxy_port"),
+        username: get("proxy_user"),
+        password: String::new(),
+        has_password,
+    }
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_proxy_settings(state: State<'_, AppState>) -> Result<ProxySettings, String> {
+    Ok(load_proxy_settings(&state))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn save_proxy_settings(
+    state: State<'_, AppState>,
+    input: ProxySettings,
+) -> Result<ProxySettings, String> {
+    let set = |k: &str, v: &str| state.store.set_setting(k, v).map_err(e);
+    set("proxy_on", if input.enabled { "on" } else { "off" })?;
+    set("proxy_type", &input.kind)?;
+    set("proxy_host", input.host.trim())?;
+    set("proxy_port", input.port.trim())?;
+    set("proxy_user", input.username.trim())?;
+    if !input.password.trim().is_empty() {
+        keyring::Entry::new(crate::secrets::SERVICE, "proxy_password")
+            .and_then(|e| e.set_password(input.password.trim()))
+            .map_err(|err| format!("钥匙串写入失败：{err}"))?;
+    }
+    apply_proxy_from_settings(&state.store);
+    Ok(load_proxy_settings(&state))
+}
+
+/// 测试代理：真实建一条到 `host:port` 的 TCP（隧道握手含在内）。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn test_proxy(
+    state: State<'_, AppState>,
+    host: String,
+    port: u16,
+) -> Result<String, String> {
+    let store = std::sync::Arc::clone(&state.store);
+    tauri::async_runtime::spawn_blocking(move || {
+        apply_proxy_from_settings(&store);
+        let via = match mailway_core::proxy::global() {
+            Some(p) => format!("经代理 {}:{}", p.host, p.port),
+            None => "当前是直连（代理未启用）".to_string(),
+        };
+        mailway_core::proxy::connect(&host, port)
+            .map(|_| format!("连接 {host}:{port} 成功（{via}）"))
+            .map_err(|err| err.user_message())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 // ================================================================= 通知 / 翻译
 
 /// 「测试通知」按钮：发一条真实系统通知，验证通知链路。

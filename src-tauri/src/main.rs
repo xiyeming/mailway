@@ -78,6 +78,8 @@ fn main() {
             tracing::info!("本地数据目录: {}", dir.display());
 
             let store = Arc::new(mailway_core::Store::open(&dir)?);
+            // 代理装配：设置页「代理设置」存的配置，启动即生效（IMAP/POP3/SMTP 全走它）
+            commands::apply_proxy_from_settings(&store);
             // 开发脚手架：MAILWAY_DEV_FAKE_IMAP=<端口> 时把账号指向本地假服务器。
             // 它会先建出账号，于是下面的 `seed` 那道「库里没账号才播种」的闸就关上了。
             demo::seed_fake_imap_account(&store)?;
@@ -125,6 +127,9 @@ fn main() {
             commands::batch_delete,
             commands::batch_move,
             commands::export_message,
+            commands::get_proxy_settings,
+            commands::save_proxy_settings,
+            commands::test_proxy,
             commands::send_test_notification,
             commands::get_translate_settings,
             commands::save_translate_settings,

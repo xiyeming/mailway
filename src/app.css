@@ -4282,3 +4282,33 @@ textarea.folder-input:focus-visible {
 .chips .chip-input {
   font-size: var(--fs-md);
 }
+
+
+/* 「高级设置」是整行分隔条，不是按钮盒子 —— 撤掉统一 .btn 从文件尾盖过来的盒子感 */
+.acc-dialog .adv-toggle {
+  width: 100%;
+  height: auto;
+  padding: 0.7rem 0.15rem 0.2rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+}
+
+.acc-dialog .adv-toggle:hover {
+  background: none;
+  border-color: transparent;
+  border-top-color: var(--line);
+  color: var(--accent);
+}
+
+.acc-dialog .adv-toggle:active {
+  transform: none;
+}
+
+/* 代理设置的密码/文本输入跟设置行紧凑档 */
+#proxy-form .setting-row .form-input {
+  height: 2.15rem;
+}

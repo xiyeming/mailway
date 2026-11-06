@@ -153,7 +153,7 @@ impl Conn {
     ///
     /// 流由我们**自己建**：统一设读/写超时（[`IO_TIMEOUT`]）——见该常量。
     pub fn connect(cfg: &Config, password: &str, is_oauth: bool) -> Result<Self> {
-        let tcp = TcpStream::connect((cfg.host.as_str(), cfg.port))
+        let tcp = crate::proxy::connect(&cfg.host, cfg.port)
             .map_err(|e| Error::ImapConnect(e.to_string()))?;
         tcp.set_read_timeout(Some(IO_TIMEOUT)).ok();
         tcp.set_write_timeout(Some(IO_TIMEOUT)).ok();

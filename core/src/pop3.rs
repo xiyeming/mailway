@@ -101,7 +101,7 @@ impl Conn {
         is_oauth: bool,
     ) -> Result<Self> {
         let addr = format!("{}:{}", cfg.host, cfg.port);
-        let tcp = TcpStream::connect(&addr)
+        let tcp = crate::proxy::connect(&cfg.host, cfg.port)
             .map_err(|e| Error::Pop3Connect(format!("连不上 {addr}: {e}")))?;
         // 超时设在升级 TLS 之前 —— TlsStream 继承底层 socket 的设置
         tcp.set_read_timeout(Some(IO_TIMEOUT)).ok();
