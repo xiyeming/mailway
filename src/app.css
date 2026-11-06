@@ -14,14 +14,20 @@
 
 :root {
   --bg: #ffffff;
-  --bg-sunken: #f4f5f7;
-  --bg-hover: #eef0f4;
-  --bg-active: #e2e6ee;
-  --fg: #1c1f26;
+  --bg-sunken: #f2f3fa;
+  --bg-hover: #eceef8;
+  --bg-active: #e0e3f4;
+  --fg: #1c2333;
   --fg-muted: #59616e;
   --fg-faint: #79818e;
-  --line: #e3e6ec;
-  --accent: #2f6feb;
+  --line: #e6e8f3;
+  --accent: #6366f1;
+
+  /* 方案A · 柔光卡片：灰紫画布 + 白色浮卡 */
+  --canvas: #eef0f6;
+  --panel-2: #fbfbfe;
+  --card-line: #eef0f7;
+  --card-sel: #f4f3ff;
   --accent-fg: #ffffff;
   --danger: #b42318;
   --warn-bg: #fff8e6;
@@ -84,7 +90,13 @@
   --fg-muted: #9aa4b2;
   --fg-faint: #6b7482;
   --line: #2a3038;
-  --accent: #4d8dff;
+  --accent: #818cf8;
+
+  /* 方案A 暗色：深蓝紫画布 + 抬升卡片 */
+  --canvas: #12141c;
+  --panel-2: #181b24;
+  --card-line: #262a38;
+  --card-sel: #272742;
   --accent-fg: #ffffff;
   --danger: #f0716a;
   --warn-bg: #2c2510;
@@ -4311,4 +4323,135 @@ textarea.folder-input:focus-visible {
 /* 代理设置的密码/文本输入跟设置行紧凑档 */
 #proxy-form .setting-row .form-input {
   height: 2.15rem;
+}
+
+
+/* ================================================================ 方案A · 柔光卡片
+   灰紫画布 + 浮起白卡 + 渐变头像 + 蓝紫渐变主色（Superhuman / Notion Mail 风）。
+   全部走令牌，亮/暗主题自动配对。 */
+
+.shell {
+  background: var(--canvas);
+}
+
+/* 左导航：浅紫渐变底，active 白卡浮起 */
+.rail {
+  background: linear-gradient(
+    185deg,
+    color-mix(in srgb, var(--accent) 7%, var(--panel-2)),
+    color-mix(in srgb, var(--accent) 13%, var(--panel-2))
+  );
+  border-right: 1px solid var(--line);
+}
+
+.rail-btn.is-active {
+  background: var(--bg);
+  color: var(--accent);
+  border-radius: 13px;
+  font-weight: 650;
+  box-shadow: 0 6px 16px rgb(80 90 160 / 16%);
+}
+
+/* 侧栏文件夹：圆角行 + active 渐变满色 */
+.side-row {
+  margin: 1px 4px;
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+.side-row:hover {
+  background: var(--bg-hover);
+}
+
+.side-row.is-active,
+.side-row[aria-current="true"] {
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 68%, #a78bfa));
+  color: var(--accent-fg);
+  font-weight: 600;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.side-count {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+  border-radius: var(--r-full);
+  padding: 1px 8px;
+}
+
+.side-row.is-active .side-count {
+  background: rgb(255 255 255 / 25%);
+  color: var(--accent-fg);
+}
+
+/* 搜索框浮起 */
+input[type="search"] {
+  border-color: var(--card-line);
+  background: var(--bg);
+  box-shadow: var(--sh-sm);
+  border-radius: 12px;
+}
+
+/* 邮件行 → 白卡（细边 + 16px 圆角 + 间距，hover 浮起） */
+#messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg);
+}
+
+.row {
+  border: 1px solid var(--card-line);
+  border-bottom: 1px solid var(--card-line);
+  border-radius: 16px;
+  background: var(--bg);
+  transition: box-shadow 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.row:hover {
+  background: var(--bg);
+  box-shadow: 0 10px 26px rgb(70 80 150 / 12%);
+  transform: translateY(-1px);
+}
+
+.row.is-sel,
+.row[aria-current="true"] {
+  background: var(--card-sel);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--card-line));
+}
+
+/* 徽标/标签 → 浅蓝紫胶囊 */
+.thread-count {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+  border-radius: var(--r-full);
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tag {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+  border-radius: var(--r-full);
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+/* 头像 → 渐变色对 */
+.avatar-c0 { background: linear-gradient(135deg, #6366f1, #a78bfa); }
+.avatar-c1 { background: linear-gradient(135deg, #10b981, #34d399); }
+.avatar-c2 { background: linear-gradient(135deg, #f43f5e, #fb7185); }
+.avatar-c3 { background: linear-gradient(135deg, #8b5cf6, #c084fc); }
+.avatar-c4 { background: linear-gradient(135deg, #f59e0b, #fbbf24); }
+.avatar-c5 { background: linear-gradient(135deg, #3b82f6, #60a5fa); }
+.avatar-c6 { background: linear-gradient(135deg, #ec4899, #f472b6); }
+.avatar-c7 { background: linear-gradient(135deg, #0ea5e9, #22d3ee); }
+
+/* 阅读区：淡紫光晕画布 */
+.reader {
+  background:
+    radial-gradient(1100px 500px at 95% -10%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 60%),
+    var(--canvas);
 }
