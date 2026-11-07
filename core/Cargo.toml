@@ -21,6 +21,7 @@ rusqlite.workspace = true
 ammonia.workspace = true
 encoding_rs.workspace = true
 base64.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "net", "time"] }

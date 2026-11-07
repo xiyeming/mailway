@@ -22,7 +22,7 @@
 //! 也永远不进日志（见 [`crate::smtp`]）。SMTP 和 IMAP 各连一次，用同一个授权码。
 
 use crate::compose::{self, Composer};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::imap;
 use crate::smtp;
 use crate::types::Account;
@@ -58,6 +58,22 @@ pub fn send_and_file(
     }
     let message_id = composer.message_id.clone().unwrap_or_default();
     let raw = composer.build()?;
+
+    // Gmail + OAuth：**优先走 Gmail API（HTTPS 443）**——SMTP 端口（465/587）
+    // 在很多网络/代理节点上被掐或被封，HTTPS 通常活着。服务端会自动把信
+    // 存进「已发送」，所以不再 APPEND（会存两份）。失败则回落 SMTP 老路。
+    if account.auth_type == "xoauth2" && is_gmail(account) {
+        match gmail_api_send(password, &raw) {
+            Ok(report) => return Ok(report),
+            Err(err) => {
+                tracing::warn!(
+                    account = account.email,
+                    error = %err.user_message(),
+                    "Gmail API 发信失败，回落 SMTP 通道"
+                );
+            }
+        }
+    }
 
     // ---- 1. 发出去 ---------------------------------------------------
     //
@@ -100,6 +116,56 @@ pub fn send_and_file(
     };
 
     Ok(SendReport { message_id, saved_to_sent })
+}
+
+/// 这个账号是不是 Gmail（API 通道的适用范围）。
+fn is_gmail(account: &Account) -> bool {
+    let domain = account.email.rsplit('@').next().unwrap_or("").to_ascii_lowercase();
+    domain == "gmail.com" || domain == "googlemail.com"
+}
+
+/// Gmail API 发信（`users/me/messages/send`）。`token` 是 OAuth access token。
+///
+/// - 原文整封 MIME base64url 编码后交给 API，一个字节不改；
+/// - Gmail **自动留「已发送」副本**（服务端标签），不再走 IMAP APPEND；
+/// - 连接层错误归 [`Error::SmtpConnect`]（让上层的连接重试一并覆盖），
+///   API 拒绝归 [`Error::Smtp`]。
+fn gmail_api_send(token: &str, raw: &str) -> Result<SendReport> {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+
+    // Message-ID 在 raw 的信头里 —— 从 raw 里挖出来报给调用方。
+    let message_id = raw
+        .lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("message-id:"))
+        .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_string()))
+        .unwrap_or_default();
+
+    let payload = serde_json::json!({ "raw": URL_SAFE_NO_PAD.encode(raw.as_bytes()) });
+    let resp = ureq::post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("Content-Type", "application/json")
+        .send_string(&payload.to_string());
+
+    let resp = match resp {
+        Ok(r) => r,
+        Err(ureq::Error::Status(code, r)) => {
+            let detail: String = r.into_string().unwrap_or_default();
+            let detail: String = detail.chars().take(300).collect();
+            return Err(Error::Smtp(format!("Gmail API 拒绝（{code}）：{detail}")));
+        }
+        // 连不上 gmail.googleapis.com（网络问题）——归连接类，享受重试
+        Err(err) => return Err(Error::SmtpConnect(format!("连不上 Gmail API：{err}"))),
+    };
+    let body = resp
+        .into_string()
+        .map_err(|err| Error::Smtp(format!("读 Gmail API 响应失败：{err}")))?;
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|err| Error::Smtp(format!("Gmail API 响应不是 JSON：{err}")))?;
+    if json["id"].as_str().is_none() {
+        return Err(Error::Smtp("Gmail API 没回执信件 id".into()));
+    }
+    Ok(SendReport { message_id, saved_to_sent: true })
 }
 
 /// APPEND 一份原文进「已发送」。原文字节一个不改。
