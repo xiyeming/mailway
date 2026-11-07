@@ -4929,3 +4929,31 @@ input[type="search"]:focus-visible {
   margin: 0 0 0.25rem;
   padding: 0.55rem 0 0.45rem;
 }
+
+
+/* 发送状态栏：与「自动保存于」并列各管各的 */
+.compose-sendstatus {
+  font-size: var(--fs-sm);
+  max-width: 26rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compose-sendstatus:empty {
+  display: none;
+}
+
+.compose-sendstatus.is-busy {
+  color: var(--fg-muted);
+}
+
+.compose-sendstatus.is-ok {
+  color: var(--fg);
+  font-weight: 650;
+}
+
+.compose-sendstatus.is-err {
+  color: var(--danger);
+  font-weight: 650;
+}

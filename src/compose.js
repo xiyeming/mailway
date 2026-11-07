@@ -331,6 +331,13 @@ function buildCompose(initialAccount) {
   // ---- 顶栏（对齐网易邮箱大师：发送在左、发件人可切、自动保存时间戳在中，
   //      危险动作收右边）------------------------------------------------
   const status = node("span", { class: "compose-status", text: "" });
+  // 发送状态**独立于自动保存**：自动保存不能冲掉「发送失败」——
+  // 之前失败红字被「自动保存于…」一盖，用户不知道到底发没发出去。
+  const sendBadge = node("span", { class: "compose-sendstatus", text: "" });
+  const setSendStatus = (text, kind = "") => {
+    sendBadge.textContent = text;
+    sendBadge.className = `compose-sendstatus${kind ? ` is-${kind}` : ""}`;
+  };
   const sendBtn = node("button", {
     class: "btn btn-primary compose-send", type: "button", text: "发送",
     title: "发送（Ctrl+Enter）", "aria-label": "发送这封信",
@@ -421,6 +428,7 @@ function buildCompose(initialAccount) {
       sendBtn,
       node("div", { class: "more-wrap from-wrap" }, fromBtn, fromMenu),
       status,
+      sendBadge,
       node("span", { class: "compose-head-gap", "aria-hidden": "true" }),
       node("div", { class: "more-wrap" },
         node("button", {
@@ -650,7 +658,7 @@ function buildCompose(initialAccount) {
   function send() {
     if (state.removed) return;
     if ([...to.get(), ...cc.get(), ...bcc.get()].length === 0) {
-      setStatus("还没有收件人");
+      setSendStatus("还没有收件人", "err");
       return;
     }
     saving = saving.then(doSend);
@@ -660,7 +668,7 @@ function buildCompose(initialAccount) {
   async function doSend() {
     sendBtn.disabled = true;
     delBtn.disabled = true;
-    setStatus("发送中…");
+    setSendStatus("发送中…", "busy");
     try {
       const r = await invoke("send_message", { draft: buildPayload(state.rev + 1) });
 
@@ -670,13 +678,14 @@ function buildCompose(initialAccount) {
 
       // `saved_to_sent` 说的是**自己这边留没留副本**，不是发没发出去。
       // 拿它当成败报，用户会在信已经到对方手里时再点一次。
-      setStatus(r.saved_to_sent
-        ? `已发送 ${r.message_id}`
-        : "已发出去了，「已发送」里没存上副本 —— 草稿留着当底");
+      setSendStatus(r.saved_to_sent ? "✓ 已发送" : "✓ 已发出（未存副本，草稿留底）", "ok");
+      // 留 0.9s 让用户看见「已发送」再关窗 —— 关太快像没反应
+      await new Promise((resolve) => setTimeout(resolve, 900));
       closeCompose();
     } catch (err) {
       // 发送失败 = 信没出去。草稿原样留着，改改再发。
-      setStatus(`发送失败：${msg(err)}`);
+      // 红字留在发送栏里，**不会被自动保存冲掉**。
+      setSendStatus(`✗ 发送失败：${msg(err)}`, "err");
     } finally {
       sendBtn.disabled = false;
       delBtn.disabled = false;
