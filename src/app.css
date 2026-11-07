@@ -1935,6 +1935,19 @@ button.thread-item:hover {
   padding: 1.25rem 1.75rem 3rem;
 }
 
+/* 快捷工具栏钉在滚动口顶部：长邮件往下滚不再把工具条带走。
+   纯白底挡住从下面穿过的正文（.reader 底色同款，无分隔线——D2 不画线）。 */
+.reader-actions {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--bg);
+  /* margin 精确吃掉 .reader 的 padding-top：钉住时留下的顶隙里会漏出
+     正文，白底必须一路盖到滚动口顶端 */
+  margin: -1.25rem 0 0.25rem;
+  padding: 1.25rem 0 0.45rem;
+}
+
 .empty {
   color: var(--fg-faint);
   padding: 3rem 0;
@@ -4897,4 +4910,22 @@ input[type="search"]:focus-visible {
 .row.is-sel .subject,
 .row[aria-current="true"] .subject {
   font-weight: 650;
+}
+
+
+/* 阅读区工具栏钉顶 · 终版
+   WebKit 的 sticky top:0 相对**内容盒**（含容器 padding 下移量）定位，
+   负 margin 会被钳住 —— 空隙填不掉。根治：容器 padding-top 归零，
+   内容盒顶 = 滚动口顶，工具栏白底一路盖到顶。 */
+.reader {
+  padding-top: 0;
+}
+
+.reader-actions {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--bg);
+  margin: 0 0 0.25rem;
+  padding: 0.55rem 0 0.45rem;
 }
