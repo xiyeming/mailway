@@ -3166,6 +3166,11 @@ if (typeof listen === "function") {
             ? `后台更新了 ${p.flags_changed} 封的标志`
             : "后台更新了邮件";
     }
+    // 桌面通知之外，**页面里也要有可见提示**——之前只有列表头一行小灰字，
+    // 用户完全感知不到（「收到了通知，但页面没有提示」）。
+    if (p.fetched > 0) {
+      toast(`收到 ${p.fetched} 封新邮件`);
+    }
     reloadAfterSync().catch((err) => console.error("刷新失败", err));
   });
 }
