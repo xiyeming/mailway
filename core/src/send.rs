@@ -65,13 +65,17 @@ pub fn send_and_file(
     if account.auth_type == "xoauth2" && is_gmail(account) {
         match gmail_api_send(password, &raw) {
             Ok(report) => return Ok(report),
-            Err(err) => {
+            // **网络错误才回落 SMTP**（可能只是 API 抖一下）；API 明确拒绝
+            // （403 没开 API / 401 令牌问题）直接报 —— 回落只会被 SMTP 的
+            // 错误盖住真原因（「Gmail API 没开」被「连不上发信服务器」埋了）。
+            Err(err @ Error::SmtpConnect(_)) => {
                 tracing::warn!(
                     account = account.email,
                     error = %err.user_message(),
-                    "Gmail API 发信失败，回落 SMTP 通道"
+                    "Gmail API 网络不通，回落 SMTP 通道"
                 );
             }
+            Err(err) => return Err(err),
         }
     }
 
