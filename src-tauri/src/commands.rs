@@ -2439,9 +2439,33 @@ fn send_message_blocking(store: &Store, draft: DraftInput) -> Result<SendResult,
         .map(|f| f.imap_name);
 
     let composer = composer_from_draft(store, &account, &draft).map_err(e)?;
-    let report =
-        mailway_core::send::send_and_file(&account, &password, composer, sent_folder.as_deref())
-            .map_err(e)?;
+
+    // 连接类失败自动重试（网络抖动/代理切换时救回来）。**只重试 SmtpConnect /
+    // Proxy**——信一旦发出去（DATA 之后的错）绝不重发，宁可报错。
+    let mut attempts = 0u32;
+    let report = loop {
+        attempts += 1;
+        match mailway_core::send::send_and_file(
+            &account,
+            &password,
+            composer.clone(),
+            sent_folder.as_deref(),
+        ) {
+            Ok(r) => break r,
+            Err(err) => {
+                let connectish = matches!(
+                    err,
+                    mailway_core::Error::SmtpConnect(_) | mailway_core::Error::Proxy(_)
+                );
+                if connectish && attempts < 3 {
+                    tracing::warn!("发信连接失败，{attempts}/3 次，稍后重试: {err}");
+                    std::thread::sleep(std::time::Duration::from_millis(1200 * attempts as u64));
+                    continue;
+                }
+                return Err(e(err));
+            }
+        }
+    };
 
     // 只有自己也留了副本才删草稿。理由见 [`SendResult::draft_deleted`]。
     let draft_deleted = if report.saved_to_sent {
