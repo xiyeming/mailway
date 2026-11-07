@@ -81,10 +81,12 @@ impl Error {
     /// 给前端看的短消息。不要把堆栈或 SQL 甩给用户。
     pub fn user_message(&self) -> String {
         match self {
-            Error::ImapConnect(_) => "连不上邮件服务器，检查网络和服务器地址".into(),
+            // 连接类错误**带上内因**：只说「连不上」等于没说——TLS 被掐、
+            // 代理没开、端口不通，用户看到的都一样，排查全靠猜。
+            Error::ImapConnect(e) => format!("连不上收信服务器（{e}）"),
             Error::ImapAuth(_) => "登录失败，检查账号和密码（或授权码）".into(),
             Error::Imap(_) => "邮件服务返回了异常".into(),
-            Error::SmtpConnect(_) => "连不上发信服务器，检查网络和服务器地址".into(),
+            Error::SmtpConnect(e) => format!("连不上发信服务器（{e}）"),
             Error::SmtpAuth(_) => "发信登录失败，检查账号和授权码".into(),
             Error::Smtp(_) => "发信服务器拒绝了这封信".into(),
             Error::Mime(_) => "这封邮件的格式有问题，解析失败".into(),
@@ -92,6 +94,8 @@ impl Error {
             Error::Secret(_) => "读不到这个账号的授权码，去账号设置里重新填一次".into(),
             Error::Db(_) => "本地数据出错".into(),
             Error::Io(_) => "本地文件读写失败".into(),
+            Error::Pop3Connect(e) => format!("连不上收信服务器（{e}）"),
+            Error::Proxy(e) => e.clone(),
             Error::Config(m) => format!("配置有误：{m}"),
             _ => "出了点问题".into(),
         }
