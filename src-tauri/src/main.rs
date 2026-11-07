@@ -100,6 +100,11 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 聚焦状态给 worker：聚焦时无 IDLE 账号加速轮询（30s）
+            if let tauri::WindowEvent::Focused(focused) = event {
+                worker::WINDOW_FOCUSED
+                    .store(*focused, std::sync::atomic::Ordering::Relaxed);
+            }
             // 关窗 = 隐藏到托盘（M5）；设置里关了就直接退出。
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let to_tray = window

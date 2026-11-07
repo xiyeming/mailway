@@ -60,6 +60,21 @@ fn pop3_poll(store: &Store) -> Duration {
     Duration::from_secs(sync_minutes(store) * 60)
 }
 
+/// 主窗口聚焦状态（`main.rs` 的窗口事件回写）。**聚焦时轮询加速**：
+/// 163/126 这类无 IDLE 的服务器只能轮询，按设置 3 分钟一圈体感太慢——
+/// 网易邮箱大师秒收是因为它走网易服务端私有推送，我们没有那条通道，
+/// 用「聚焦时 30 秒一圈」逼近同样的即时感；后台回到设置频率，不扰民。
+pub static WINDOW_FOCUSED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+fn adaptive_poll(store: &Store) -> Duration {
+    if WINDOW_FOCUSED.load(std::sync::atomic::Ordering::Relaxed) {
+        Duration::from_secs(30)
+    } else {
+        pop3_poll(store)
+    }
+}
+
 /// 连不上的退避：5 秒起，翻倍到 5 分钟封顶。
 const BACKOFF_MIN: Duration = Duration::from_secs(5);
 const BACKOFF_MAX: Duration = Duration::from_secs(5 * 60);
@@ -153,7 +168,7 @@ fn run_pop3(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
             }
         }
         pop.quit().ok();
-        thread::sleep(pop3_poll(&store));
+        thread::sleep(adaptive_poll(&store));
     }
 }
 
@@ -216,7 +231,7 @@ fn run_imap(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
         loop {
             if !idle_ok {
                 // 轮询模式：按收信频率（设置→邮件读写）探活 + 收一轮
-                thread::sleep(pop3_poll(&store));
+                thread::sleep(adaptive_poll(&store));
                 if conn.noop().is_err() {
                     tracing::warn!(account = %account.email, "连接断了，重连");
                     break;
