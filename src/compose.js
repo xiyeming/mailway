@@ -336,6 +336,8 @@ function buildCompose(initialAccount) {
   const sendBadge = node("span", { class: "compose-sendstatus", text: "" });
   const setSendStatus = (text, kind = "") => {
     sendBadge.textContent = text;
+    // title 也放全文：行内再宽也可能被挤，悬停永远能看到完整的病因
+    sendBadge.title = text;
     sendBadge.className = `compose-sendstatus${kind ? ` is-${kind}` : ""}`;
   };
   const sendBtn = node("button", {

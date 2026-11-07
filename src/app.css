@@ -4934,10 +4934,9 @@ input[type="search"]:focus-visible {
 /* 发送状态栏：与「自动保存于」并列各管各的 */
 .compose-sendstatus {
   font-size: var(--fs-sm);
-  max-width: 26rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 允许换行到两行：错误病因（TLS/代理/端口）必须读得全，不给省略号 */
+  max-width: min(52rem, 62vw);
+  line-height: 1.45;
 }
 
 .compose-sendstatus:empty {
