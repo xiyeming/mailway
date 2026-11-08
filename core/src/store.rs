@@ -528,8 +528,9 @@ impl Store {
     ) -> Result<Vec<MessageSummary>> {
         let conn = self.lock()?;
         let mut stmt = conn.prepare(
+            // 时间**倒序**：最新的在最上面（阅读区会话堆叠按此渲染）。
             "SELECT * FROM messages WHERE account_id = ?1 \
-              ORDER BY COALESCE(date, received_at) ASC, uid ASC",
+              ORDER BY COALESCE(date, received_at) DESC, uid DESC",
         )?;
         let rows = stmt.query_map(params![account_id], row_to_summary)?;
         let all = rows.collect::<rusqlite::Result<Vec<_>>>()?;
