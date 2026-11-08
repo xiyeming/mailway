@@ -159,7 +159,7 @@ fn run_pop3(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
         drop(password);
 
         match SyncEngine::new(&store).sync_pop3(&mut pop, account.id) {
-            Ok(out) => report(&app, account.id, std::slice::from_ref(&out)),
+            Ok(out) => report(&app, &store, account.id, std::slice::from_ref(&out)),
             Err(e) => {
                 tracing::warn!(account = %account.email, "POP3 同步失败: {}", e.user_message());
                 thread::sleep(backoff);
@@ -271,7 +271,7 @@ fn run_imap(app: tauri::AppHandle, store: Arc<Store>, account: Account) {
 /// 全量一轮：每个可选的文件夹都同步一遍。
 fn sync_all(app: &tauri::AppHandle, store: &Store, account_id: i64, conn: &mut Conn) -> Result<()> {
     let outs = SyncEngine::new(store).sync_account(conn, account_id)?;
-    report(app, account_id, &outs);
+    report(app, store, account_id, &outs);
     Ok(())
 }
 
@@ -281,7 +281,7 @@ fn sync_inbox(app: &tauri::AppHandle, store: &Store, account_id: i64, conn: &mut
         return Ok(()); // 起步同步还没建出 INBOX，这轮跳过
     };
     let out = SyncEngine::new(store).sync_folder(conn, account_id, &folder)?;
-    report(app, account_id, std::slice::from_ref(&out));
+    report(app, store, account_id, std::slice::from_ref(&out));
     Ok(())
 }
 
@@ -293,7 +293,7 @@ fn refresh_inbox(app: &tauri::AppHandle, store: &Store, account_id: i64, conn: &
     let changed = SyncEngine::new(store).refresh_flags(conn, &folder)?;
     if changed > 0 {
         tracing::info!(account_id, changed, "标志刷新了 {changed} 封");
-        emit(app, account_id, 0, 0, changed, 0);
+        emit(app, &store, account_id, 0, 0, changed, 0);
     }
     Ok(())
 }
@@ -309,7 +309,7 @@ fn inbox_folder(store: &Store, account_id: i64) -> Result<Option<Folder>> {
 
 // ================================================================= 通知
 
-fn report(app: &tauri::AppHandle, account_id: i64, outs: &[FolderSync]) {
+fn report(app: &tauri::AppHandle, store: &Store, account_id: i64, outs: &[FolderSync]) {
     let fetched: u32 = outs.iter().map(|o| o.fetched).sum();
     let broken: u32 = outs.iter().map(|o| o.broken).sum();
     let flags_changed: u32 = outs.iter().map(|o| o.flags_changed).sum();
@@ -320,7 +320,7 @@ fn report(app: &tauri::AppHandle, account_id: i64, outs: &[FolderSync]) {
         return;
     }
     tracing::info!(account_id, fetched, broken, flags_changed, rebuilt, "同步完成");
-    emit(app, account_id, fetched, broken, flags_changed, rebuilt);
+    emit(app, &store, account_id, fetched, broken, flags_changed, rebuilt);
     // 收到新信 → 桌面通知（M5，`org.freedesktop.Notifications`）。
     // 按文件夹「新邮件提醒」开关过滤（右键文件夹可关）。
     if fetched > 0 {
@@ -399,13 +399,31 @@ fn notify_new_mail(app: &tauri::AppHandle, account_id: i64, outs: &[FolderSync])
     }
 }
 
-fn emit(app: &tauri::AppHandle, account_id: i64, fetched: u32, broken: u32, flags_changed: u32, rebuilt: u32) {
+fn emit(app: &tauri::AppHandle, store: &Store, account_id: i64, fetched: u32, broken: u32, flags_changed: u32, rebuilt: u32) {
+    // 事件里**带上这个账号的最新未读数**。前端刚收到新信时自己再算
+    // `smart_counts` 可能还是旧值（同步入库在前端可见之前完成，时序不一
+    // 致），这种竞态下「所有未读」角标就是空的 —— 后端算好随事件下发最稳。
+    let unread = store
+        .list_messages(
+            store
+                .list_folders(account_id)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|f| f.kind == mailway_core::types::FolderKind::Inbox)
+                .map(|f| f.id)
+                .unwrap_or(0),
+            1_000_000,
+            0,
+        )
+        .map(|ms| ms.iter().filter(|m| !m.flags.seen).count() as u32)
+        .unwrap_or(0);
     let payload = serde_json::json!({
         "account_id": account_id,
         "fetched": fetched,
         "broken": broken,
         "flags_changed": flags_changed,
         "rebuilt": rebuilt,
+        "account_unread": unread,
     });
     if let Err(e) = app.emit(EVENT_SYNC_CHANGED, payload) {
         // 前端还没起来 / 窗口关了，都属于正常，别当错误处理

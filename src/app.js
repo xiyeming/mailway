@@ -30,6 +30,11 @@ if (typeof invoke !== "function") {
 
 // ================================================================= 状态
 
+/** 后端事件带的未读上界（账号 id → 未读数），模块级不被 state 重赋值清掉。
+ * 新信入库在前端 smart_counts 可见之前完成（同步在另一连接），重拉是旧值，
+ * 渲染取 max(smart_counts, 这里) —— 「所有未读」收到新信却空着的根因。 */
+const unreadHint = new Map();
+
 const state = {
   account: null,
   /** 折叠的文件夹 id（子文件夹树）。 */
@@ -80,6 +85,9 @@ const state = {
   mailboxSel: null,
   mailboxTab: "info",
 };
+// 调试/测试观测窗（生产无影响）
+window.__MAILWAY_STATE__ = state;
+
 
 // ================================================================= 格式化
 
@@ -201,7 +209,10 @@ function folderUnread(id) {
   return (state.counts?.folder_unread || []).find(([k]) => k === id)?.[1] ?? 0;
 }
 function accountUnread(id) {
-  return (state.counts?.account_unread || []).find(([k]) => k === id)?.[1] ?? 0;
+  const real = (state.counts?.account_unread || []).find(([k]) => k === id)?.[1] ?? 0;
+  // 权威数到 0 就清掉上界（信都读完了）
+  if (real === 0 && unreadHint.has(id)) unreadHint.delete(id);
+  return Math.max(real, unreadHint.get(id) ?? 0);
 }
 function accountFlagged(id) {
   return (state.counts?.account_flagged || []).find(([k]) => k === id)?.[1] ?? 0;
@@ -747,7 +758,9 @@ function renderSidebar() {
           key: `quick:${q.filter}`,
           icon: q.icon,
           name: q.name,
-          count: c[q.countKey] ?? 0,
+          count: q.countKey === "all_unread" || q.countKey === "inbox_unread"
+            ? Math.max(c[q.countKey] ?? 0, ...unreadHint.values())
+            : (c[q.countKey] ?? 0),
           onclick: () => openSmart(q.filter, null, q.name, !!q.isDrafts),
           ctx: (e) => openSmartCtxMenu(e, state.account || state.accounts[0]),
         }),
@@ -844,7 +857,10 @@ function renderSidebar() {
         );
         if (f.kind === "inbox" && !smartDone) {
         for (const s of ACCOUNT_SMART) {
-          const n = s.filter === "unread" ? accountUnread(a.id) : accountFlagged(a.id);
+          const base = s.filter === "unread" ? accountUnread(a.id) : accountFlagged(a.id);
+          const n = s.filter === "unread"
+            ? Math.max(base, unreadHint.get(a.id) ?? 0)
+            : base;
           box.append(
             sidebarRow({
               key: `smart:${s.filter}:${a.id}`,
@@ -3170,6 +3186,11 @@ if (typeof listen === "function") {
     // 用户完全感知不到（「收到了通知，但页面没有提示」）。
     if (p.fetched > 0) {
       toast(`收到 ${p.fetched} 封新邮件`);
+    }
+    // 后端随事件带的**当前未读**是权威值，存模块级 Map（重拉旧值盖不回）。
+    if (p.account_unread != null && p.account_unread > 0) {
+      unreadHint.set(p.account_id, Math.max(unreadHint.get(p.account_id) ?? 0, p.account_unread));
+      renderSidebar();
     }
     reloadAfterSync().catch((err) => console.error("刷新失败", err));
   });
