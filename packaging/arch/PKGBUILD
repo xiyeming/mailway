@@ -1,7 +1,9 @@
 # Maintainer: xiyeming <https://github.com/xiyeming>
 # Mailway —— 原生 Wayland 邮件客户端（Tauri 2 + Rust）
 pkgname=mailway
-pkgver=0.0.7
+# 版本跟随 Cargo.toml——发版只改一处（tauri.conf.json 同步走 Cargo.toml
+# workspace version），避免 PKGBUILD 漏升导致打出来的包是旧代码。
+pkgver=$(grep -m1 -Po '^version = "\K[^"]+' "$PWD/../../Cargo.toml")
 pkgrel=1
 pkgdesc="原生 Wayland 邮件客户端（Tauri 2 + Rust）"
 arch=('x86_64')
