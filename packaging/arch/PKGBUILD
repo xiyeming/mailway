@@ -1,7 +1,7 @@
 # Maintainer: xiyeming <https://github.com/xiyeming>
 # Mailway —— 原生 Wayland 邮件客户端（Tauri 2 + Rust）
 pkgname=mailway
-pkgver=0.0.6
+pkgver=0.0.7
 pkgrel=1
 pkgdesc="原生 Wayland 邮件客户端（Tauri 2 + Rust）"
 arch=('x86_64')
