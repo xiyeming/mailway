@@ -210,8 +210,9 @@ function folderUnread(id) {
 }
 function accountUnread(id) {
   const real = (state.counts?.account_unread || []).find(([k]) => k === id)?.[1] ?? 0;
-  // 权威数到 0 就清掉上界（信都读完了）
-  if (real === 0 && unreadHint.has(id)) unreadHint.delete(id);
+  // 后端**数到非 0** 才清上界 —— 数到 0 可能是竞态里的旧值（新信刚入库，
+  // 这次 smart_counts 还没数到），误清会让「所有未读」又空掉。
+  if (real > 0 && unreadHint.has(id)) unreadHint.delete(id);
   return Math.max(real, unreadHint.get(id) ?? 0);
 }
 function accountFlagged(id) {
