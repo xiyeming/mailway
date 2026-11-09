@@ -3178,6 +3178,9 @@ async function reloadAfterSync() {
 const listen = globalThis.__TAURI__?.event?.listen;
 if (typeof listen === "function") {
   listen("sync://changed", (e) => {
+    // 探针：收到 sync 事件就弹 toast（前台验证用，定完删除）
+    toast(`sync 事件: fetched=${(e && e.payload && e.payload.fetched) ?? "?"} unread=${(e && e.payload && e.payload.account_unread) ?? "无"}`);
+    console.log("[mailway] sync event", JSON.stringify((e && e.payload) || {}));
     const p = (e && e.payload) || {};
     const status = document.getElementById("sync-status");
     if (status) {
