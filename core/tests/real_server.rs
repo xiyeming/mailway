@@ -38,6 +38,7 @@ fn insert(store: &Store, email: &str, protocol: Protocol, recv_host: &str, recv_
     store
         .insert_account(&NewAccount {
             name: "真实测试",
+            alias: "",
             email,
             protocol,
             imap_host: recv_host,

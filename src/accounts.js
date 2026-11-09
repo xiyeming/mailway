@@ -79,8 +79,11 @@ export function openAccountForm({ onSaved } = {}) {
  * 构建「嵌入主区」的添加账号页（方案 A：与设置页同构，不再是弹窗）。
  * 由调用方挂进 stage；`onClose` 负责离开本页（返回邮件视图）。
  */
-export function buildAccountPage({ onSaved, onClose } = {}) {
-  return buildForm(onSaved, { page: { onClose } }).root;
+export function buildAccountPage({ onSaved, onClose, edit } = {}) {
+  return buildForm(onSaved, {
+    page: { onClose },
+    ...(edit ? { edit } : {}),
+  }).root;
 }
 
 export function closeAccountForm() {
@@ -95,6 +98,8 @@ function buildForm(onSaved, opts = {}) {
   // 两种容器：对话框（scrim 小窗）或嵌入主区的页面（方案 A，同设置页架构）。
   // 页面模式没有「点外面关掉」——返回键/✕/取消负责退出。
   const asPage = !!opts.page;
+  // 编辑模式：预填现有账号，保存走 update_account（授权码留空 = 不动）
+  const editing = opts.edit ?? null;
   const dismiss = () => {
     if (asPage) opts.page.onClose?.();
     else closeAccountForm();
@@ -106,6 +111,7 @@ function buildForm(onSaved, opts = {}) {
   let recvProto = "imap";
   // ---- 账号本身 -------------------------------------------------------
   const name = textInput("acc-name", "text", "发信时显示的名字");
+  const alias = textInput("acc-alias", "text", "如：工作（留空用名称）");
   const email = textInput("acc-email", "email", "you@example.com");
   // 用户名不再单独配置：各家都认「用户名 = 邮箱」，少一个必填项。
   // 授权码：见文件头。type=password 但它不是「登录密码」，见下面那行提示。
@@ -190,7 +196,9 @@ function buildForm(onSaved, opts = {}) {
   const protoHint = node("p", { class: "form-hint", text: "" });
   const mkProtoBtn = (value, label) => {
     const b = node("button", {
-      class: "btn proto-btn", type: "button", text: label,
+      // 用设置页同款 .seg 分段组件（暗色主题已验证），不用自制 proto-btn ——
+      // 它在 WebKitGTK 的 focus/hover 下有无法复现的配色异常。
+      class: "seg-btn", type: "button", text: label,
       onclick: () => setProto(value),
     });
     b.dataset.value = value;
@@ -198,7 +206,7 @@ function buildForm(onSaved, opts = {}) {
   };
   // 一行式：[IMAP|POP3] + 主机 + 端口。切换协议时主机前缀/端口/提示跟着转。
   const protoRow = node("div", { class: "form-row proto-line" },
-    node("div", { class: "form-radios proto-seg", role: "group", "aria-label": "收信协议" },
+    node("div", { class: "seg", role: "group", "aria-label": "收信协议" },
       mkProtoBtn("imap", "IMAP"),
       mkProtoBtn("pop3", "POP3"),
     ),
@@ -208,7 +216,7 @@ function buildForm(onSaved, opts = {}) {
   );
   function setProto(value) {
     recvProto = value;
-    protoRow.querySelectorAll(".proto-btn").forEach((b) => {
+    protoRow.querySelectorAll(".seg-btn").forEach((b) => {
       const on = b.dataset.value === value;
       b.classList.toggle("is-on", on);
       b.setAttribute("aria-pressed", String(on));
@@ -228,6 +236,22 @@ function buildForm(onSaved, opts = {}) {
   }
   setProto("imap");
 
+  // ---- 编辑模式：把现有账号信息预填进去 -------------------------------
+  // 顺序有讲究：setProto 会按加密方式重置端口，所以端口最后填。
+  if (editing) {
+    name.value = editing.name || "";
+    alias.value = editing.alias || "";
+    email.value = editing.email || "";
+    imapSec.set(editing.imap_security || "ssl");
+    smtpSec.set(editing.smtp_security || "ssl");
+    setProto(editing.protocol === "pop3" ? "pop3" : "imap");
+    imapHost.value = editing.imap_host || "";
+    imapPort.value = String(editing.imap_port || "");
+    smtpHost.value = editing.smtp_host || "";
+    smtpPort.value = String(editing.smtp_port || "");
+    password.placeholder = "留空则不修改授权码";
+  }
+
   // ---- 真实服务器登录测试（不保存）-------------------------------------
   const testBtn = node("button", {
     class: "btn", type: "button", text: "测试登录",
@@ -238,6 +262,7 @@ function buildForm(onSaved, opts = {}) {
   function buildInput() {
     return {
       name: name.value.trim(),
+      alias: alias.value.trim(),
       email: email.value.trim(),
       imap_host: imapHost.value.trim(),
       imap_port: Number(imapPort.value),
@@ -298,9 +323,10 @@ function buildForm(onSaved, opts = {}) {
   // 不再有独立的 Google 按钮。
   const isGmail = () => /@(gmail|googlemail)\.com$/i.test(email.value.trim());
   const updateLoginBtn = () => {
-    saveBtn.textContent = isGmail() ? "使用 Google 登录" : "登录";
+    saveBtn.textContent = editing ? "保存" : (isGmail() ? "使用 Google 登录" : "登录");
   };
   email.addEventListener("input", updateLoginBtn);
+  updateLoginBtn();
 
   // ---- 供应商速选 -----------------------------------------------------
   // 对话框里是一排胶囊；页面里是同侧栏行语汇的行列表（hover 底 / 选中高亮 /
@@ -366,7 +392,7 @@ function buildForm(onSaved, opts = {}) {
             title: "返回", "aria-label": "返回",
             onclick: () => opts.page.onClose?.(),
           }),
-          node("span", { text: "添加账号" }),
+          node("span", { text: editing ? "编辑账号" : "添加账号" }),
           node("span", { class: "acc-head-gap", "aria-hidden": "true" }),
           node("button", {
             class: "btn acc-close", type: "button", text: "✕",
@@ -376,16 +402,18 @@ function buildForm(onSaved, opts = {}) {
         ),
         node("div", { class: "acc-page-body" },
           node("form", { class: "acc-page-form", onsubmit: onSubmit },
-            node("div", { class: "dlg-sec", text: "选择邮箱" }),
-            providerSelect,
+            // 编辑模式不显示供应商速选（邮箱已定，选供应商会覆盖手填的值）
+            editing ? null : node("div", { class: "dlg-sec", text: "选择邮箱" }),
+            editing ? null : providerSelect,
             node("div", { class: "dlg-sec", text: "账号信息" }),
             node("div", { class: "form-grid" },
               field("acc-name", "名称", name),
+              field("acc-alias", "别名", alias),
               field("acc-email", "邮箱", email),
               field("acc-pass", "授权码", password),
               node("p", {
                 class: "form-hint",
-                text: "授权码不是登录密码：各家邮箱要先在网页版单独生成（Gmail 无需授权码，直接登录）。",
+                text: "授权码不是登录密码：各家邮箱要先在网页版单独生成（Gmail 无需授权码，直接登录）。别名显示在聚合邮件列表的账号标签里。",
               }),
             ),
             advToggle,
@@ -413,11 +441,12 @@ function buildForm(onSaved, opts = {}) {
         node("div", { class: "dlg-sec", text: "账号信息" }),
         node("div", { class: "form-grid" },
           field("acc-name", "名称", name),
+          field("acc-alias", "别名", alias),
           field("acc-email", "邮箱", email),
           field("acc-pass", "授权码", password),
           node("p", {
             class: "form-hint",
-            text: "授权码不是登录密码：各家邮箱要先在网页版单独生成（Gmail 无需授权码，直接登录）。",
+            text: "授权码不是登录密码：各家邮箱要先在网页版单独生成（Gmail 无需授权码，直接登录）。别名显示在聚合邮件列表的账号标签里。",
           }),
         ),
         advToggle,
@@ -467,14 +496,18 @@ function buildForm(onSaved, opts = {}) {
   }
 
   async function save() {
-    // Gmail 且没填授权码 → 先走统一「登录」里的 OAuth（webview），拿到令牌再存
-    if (isGmail() && !password.value.trim()) {
+    // Gmail 且没填授权码 → 先走统一「登录」里的 OAuth（webview），拿到令牌再存。
+    // 编辑模式不走这分支：令牌在钥匙串里原样保留。
+    if (!editing && isGmail() && !password.value.trim()) {
       await googleLogin();
       if (!password.value.trim()) return; // 用户取消了授权
     }
     const input = buildInput();
+    // 编辑且授权码留空：登录方式保持原样（钥匙串里可能是 xoauth2 令牌，
+    // 被翻成 password 就再也连不上了）；填了新授权码才按新值走。
+    if (editing && !input.password.trim()) input.auth_type = editing.auth_type;
 
-    const bad = validate(input, { email, password, imapHost, smtpHost, imapPort, smtpPort });
+    const bad = validate(input, { email, password, imapHost, smtpHost, imapPort, smtpPort }, editing != null);
     if (bad) {
       // 校验失败只说哪一项，不动已填的东西 —— 尤其是授权码。
       status.textContent = bad.message;
@@ -485,6 +518,13 @@ function buildForm(onSaved, opts = {}) {
     saveBtn.disabled = true;
     status.textContent = "正在保存…";
     try {
+      if (editing) {
+        // 编辑：更新连接信息；授权码只有填了新值才写钥匙串
+        const account = await invoke("update_account", { account_id: editing.id, input });
+        dismiss();
+        onSaved?.(account);
+        return;
+      }
       const account = await invoke("create_account", { input });
       dismiss();
       onSaved?.(account);
@@ -534,7 +574,7 @@ function buildForm(onSaved, opts = {}) {
  *
  * 返回 `{ message, field }` 或 `null`。
  */
-function validate(input, els) {
+function validate(input, els, passOptional = false) {
   if (!input.email.includes("@") || /\s/.test(input.email)) {
     return { message: "邮箱地址看起来不对", field: els.email };
   }
@@ -543,6 +583,8 @@ function validate(input, els) {
     ["IMAP 主机", input.imap_host, els.imapHost],
     ["SMTP 主机", input.smtp_host, els.smtpHost],
   ]) {
+    // 编辑模式允许授权码留空（= 不改钥匙串里那份）
+    if (label === "授权码" && passOptional) continue;
     if (!v) return { message: `${label}还没填`, field: f };
   }
   for (const [label, p, f] of [
@@ -620,5 +662,10 @@ function securityRadios(name, ports, portInput, checked) {
       box,
     ),
     value: () => box.querySelector(`input[name="${name}"]:checked`)?.value ?? "ssl",
+    /** 编辑账号预填用：选中指定加密方式（不触发换端口的 change 逻辑）。 */
+    set: (v) => {
+      const r = box.querySelector(`input[name="${name}"][value="${v}"]`);
+      if (r) r.checked = true;
+    },
   };
 }

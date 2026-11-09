@@ -1255,6 +1255,35 @@ body {
   white-space: nowrap;
 }
 
+/* 聚合视图行的归属账号 tag（方案 B）：色点 + 名字，排在邮件标签前面 */
+.acct-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--fg);
+  background: var(--bg-active);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0 0.4rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.acct-tag .acct-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.acct-tag .acct-name {
+  max-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .row-status .ic-star {
   color: var(--warn-fg);
 }
@@ -2036,6 +2065,21 @@ button.thread-item:hover {
   /* 宽邮件（大表格/图片）超宽时横向滚动，不再裁死 */
   overflow-x: auto;
   max-width: 100%;
+
+  /* 邮件正文还原原生排版基准：全局的 border-box 和 1.55 行高是为应用
+     界面定的，泄漏进邮件会搅乱邮件自己的布局——按 content-box 设计的
+     固定尺寸按钮（Apple 邮件的药丸按钮等）文字被挤偏上/偏下就是它们。
+     隔离成邮件世界自己的盒模型和行高。 */
+  line-height: 1.4;
+}
+
+/* 盒模型隔离必须连子树一起（* 选择器只对本元素生效没用） */
+.mail-body,
+.mail-body *,
+.mail-body *::before,
+.mail-body *::after {
+  box-sizing: content-box;
+}
 
   /* 按钮式链接（带内边距的 inline-block，GitHub 通知的绿色按钮就是它）：
      邮件自带 line-height:1.5 的半行距把字往上顶，视觉不居中 —— 收紧行盒
@@ -3113,21 +3157,11 @@ button:focus-visible,
   color: var(--fg);
 }
 
-.proto-btn {
-  padding: 0.3rem 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--bg);
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: inherit;
-  cursor: pointer;
-}
-
-.proto-btn.is-on {
-  border-color: var(--accent, #4f6bf6);
-  background: var(--accent, #4f6bf6);
-  color: #fff;
+/* 收信协议切换（IMAP/POP3）已改用设置页同款 .seg 组件，
+   这里的自制 .proto-btn / .proto-seg 样式随之退役 */
+/* 页面表单的 .form-row 是纵向 flex，.seg 会被拉满整行 —— 收成内容宽 */
+.proto-line .seg {
+  align-self: flex-start;
 }
 
 /* 左栏账号列表底下的按钮 + 一个账号都没有时中栏那块 */
@@ -3701,10 +3735,6 @@ button:focus-visible,
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
-}
-
-.proto-seg {
-  flex-shrink: 0;
 }
 
 .proto-line .host-input {
@@ -5165,4 +5195,16 @@ input[type="search"]:focus-visible {
 .compose-sendstatus.is-err {
   color: var(--danger);
   font-weight: 650;
+}
+
+/* ================================================================ 邮件正文类名隔离
+   应用界面用的类名（.btn/.tag/.date/.from/.subject/.preview…）也是邮件 HTML 里的
+   高频类名——Apple 邮件的 <a class="btn"> 就吃了 .btn 的深色背景（蓝字配深底）。
+   在邮件世界里把这些通用类名还原成浏览器默认样式，让邮件自己的内联样式/类定义
+   生效。:where() 零特异性，放文件尾靠「同优先级后写胜出」压过上面的应用规则。 */
+.mail-body :where(.btn, .button, .tag, .label, .badge, .icon, .date, .from, .subject,
+  .preview, .dot, .avatar, .empty, .muted, .banner, .card, .chip, .row, .rows,
+  .menu, .list, .title, .text, .link, .container, .content, .wrapper, .header,
+  .footer, .main, .nav, .section, .meta, .info, .name, .email, .time, .count) {
+  all: revert;
 }

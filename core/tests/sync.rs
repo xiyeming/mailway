@@ -55,6 +55,7 @@ fn seed_account(store: &Store) -> i64 {
     store
         .insert_account(&NewAccount {
             name: "测试",
+            alias: "",
             email: "me@example.com",
             protocol: Protocol::Imap,
             imap_host: "127.0.0.1",

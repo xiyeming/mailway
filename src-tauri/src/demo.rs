@@ -80,6 +80,7 @@ pub fn seed_fake_imap_account(store: &Store) -> Result<bool> {
         }
         None => store.insert_account(&NewAccount {
             name: "本地假服务器",
+            alias: "",
             email: EMAIL,
             protocol: Protocol::Imap,
             imap_host: "127.0.0.1",
@@ -120,6 +121,7 @@ pub fn seed(store: &Store) -> Result<()> {
 
     let account_id = store.insert_account(&NewAccount {
         name: "示例邮箱",
+        alias: "",
         email: "demo@mailway.local",
         protocol: Protocol::Imap,
         imap_host: "imap.mailway.local",

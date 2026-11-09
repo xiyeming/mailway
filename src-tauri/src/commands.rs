@@ -2270,6 +2270,8 @@ pub fn set_account_secret(
 pub struct NewAccountInput {
     /// 显示名，也是发信时 `From:` 上那个名字
     pub name: String,
+    /// 别名：聚合列表账号标签里显示，留空用 `name`
+    pub alias: String,
     pub email: String,
     /// 收信服务器（IMAP 或 POP3，看 `protocol`）
     pub imap_host: String,
@@ -2355,6 +2357,7 @@ pub fn create_account(
         .store
         .insert_account(&NewAccount {
             name: &input.name,
+            alias: &input.alias,
             email: &input.email,
             protocol: match input.protocol.as_deref() {
                 Some("pop3") => Protocol::Pop3,
@@ -2388,6 +2391,61 @@ pub fn create_account(
         return Err(e(err));
     }
     Ok(account)
+}
+
+/// 编辑账号：更新连接信息。`password` 留空 = 授权码不动（编辑器里不显示、
+/// 也不该回传旧值 —— 钥匙串里那份继续用）；填了才写钥匙串。
+#[tauri::command(rename_all = "snake_case")]
+pub fn update_account(
+    state: State<'_, AppState>,
+    account_id: i64,
+    input: NewAccountInput,
+) -> Result<Account, String> {
+    let old = state
+        .store
+        .get_account(account_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("要编辑的账号"))?;
+    state
+        .store
+        .update_account(
+            account_id,
+            &NewAccount {
+                name: &input.name,
+                alias: &input.alias,
+                email: &input.email,
+                protocol: match input.protocol.as_deref() {
+                    Some("pop3") => Protocol::Pop3,
+                    _ => Protocol::Imap,
+                },
+                imap_host: &input.imap_host,
+                imap_port: input.imap_port,
+                imap_security: input.imap_security,
+                imap_username: &input.username,
+                smtp_host: &input.smtp_host,
+                smtp_port: input.smtp_port,
+                smtp_security: input.smtp_security,
+                smtp_username: &input.username,
+                signature: &old.signature,
+                enabled: old.enabled,
+                auth_type: input.auth_type.as_deref().unwrap_or("password"),
+            },
+        )
+        .map_err(e)?;
+    // 授权码另存（钥匙串）：填了新值才动，空 = 保持原样
+    if !input.password.is_empty() {
+        let account = state
+            .store
+            .get_account(account_id)
+            .map_err(e)?
+            .ok_or_else(|| not_found("更新后的账号"))?;
+        secrets::set(&state.store, &account, &input.password).map_err(e)?;
+    }
+    state
+        .store
+        .get_account(account_id)
+        .map_err(e)?
+        .ok_or_else(|| not_found("更新后的账号"))
 }
 
 // ================================================================= 发信

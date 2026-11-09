@@ -127,6 +127,7 @@ fn main() {
             commands::core_ping,
             commands::list_accounts,
             commands::create_account,
+            commands::update_account,
             commands::set_account_secret,
             commands::save_attachment,
             commands::batch_set_flags,

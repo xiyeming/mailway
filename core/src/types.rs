@@ -49,6 +49,9 @@ pub struct Account {
     pub id: i64,
     /// 显示名（用户自己起的，比如「工作」）
     pub name: String,
+    /// 别名：聚合邮件列表的归属账号标签里显示，留空用 `name`。
+    /// 给「163 邮箱」起个「工作」这类短名，列表里一眼归类。
+    pub alias: String,
     /// 邮箱地址，如 `someone@gmail.com`
     pub email: String,
     pub protocol: Protocol,

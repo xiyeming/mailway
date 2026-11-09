@@ -12,6 +12,7 @@ use mailway_core::types::*;
 fn sample_account() -> NewAccount<'static> {
     NewAccount {
         name: "工作",
+        alias: "",
         email: "someone@example.com",
         protocol: Protocol::Imap,
         imap_host: "imap.example.com",
@@ -929,6 +930,7 @@ fn drafts_are_scoped_to_one_account() {
     let b = s
         .insert_account(&NewAccount {
             name: "另一个",
+            alias: "",
             email: "other@example.com",
             ..sample_account()
         })

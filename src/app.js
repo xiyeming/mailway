@@ -83,6 +83,8 @@ const state = {
   /** 邮箱设置：选中账号 + 当前 tab（info/signature/template/rules）。 */
   mailboxSel: null,
   mailboxTab: "info",
+  /** 编辑模式进「添加账号」页时要改的账号（null = 纯添加）。 */
+  editingAccount: null,
 };
 // 调试/测试观测窗（生产无影响）
 window.__MAILWAY_STATE__ = state;
@@ -457,17 +459,28 @@ async function switchMode(mode) {
 }
 
 /**
- * 添加账号页（方案 A：嵌入主区，同设置页架构，不再是弹窗）。
+ * 添加/编辑账号页（方案 A：嵌入主区，同设置页架构，不再是弹窗）。
  * 保存成功 → 回邮件视图并切到新账号 + 收一次信；返回/✕/取消/Esc → 回邮件视图。
  */
 function buildAddAccount(stage) {
+  const edit = state.editingAccount;
+  state.editingAccount = null;
   stage.append(
     buildAccountPage({
+      ...(edit ? { edit } : {}),
       onSaved: async (account) => {
         state.accounts = await invoke("list_accounts");
         await switchMode("mail");
-        await useAccount(account);
-        syncNow();
+        if (edit && state.account && state.account.id === account.id) {
+          // 编的是当前在用的账号：就地换数据，别把阅读位置踢掉
+          state.account = account;
+          renderAccount();
+          renderSidebar();
+          syncNow();
+        } else {
+          await useAccount(account);
+          syncNow();
+        }
       },
       onClose: () => switchMode("mail"),
     }),
@@ -605,11 +618,19 @@ function withDraftsFolder(folders) {
  */
 function renderAccount() {}
 
-/** 账号行右侧「⋮」菜单：删除这个账号（两步确认）。 */
+/** 账号行右侧「⋮」菜单：编辑 / 删除这个账号（删除两步确认）。 */
 function accountMenu(a) {
   const label = `删除「${a.name || a.email}」`;
   const menu = node("div", { class: "more-menu", hidden: true, role: "menu" });
   menu.append(
+    node("button", {
+      class: "more-item", type: "button", role: "menuitem", text: "编辑账号",
+      onclick: () => {
+        closeMore();
+        state.editingAccount = a;
+        switchMode("addaccount");
+      },
+    }),
     node("button", {
       class: "more-item is-danger", type: "button", role: "menuitem", text: label,
       onclick: (e) => armAccountDelete(e, a),
@@ -2225,6 +2246,21 @@ function groupIntoThreads(list) {
   return threads;
 }
 
+/** 聚合视图行的归属账号 tag（方案 B）：色点 + 名字。
+ *  色点复用头像调色板（同哈希 → 同账号在头像和 tag 上同色）。仅聚合视图用。 */
+function accountTag(accountId) {
+  const a = state.accounts.find((x) => x.id === accountId);
+  if (!a) return null;
+  let h = 0;
+  const s = a.email || a.name || "";
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  const label = a.alias || a.name || a.email;
+  return node("span", { class: "acct-tag", title: `${a.email}${a.alias ? ` · 别名「${a.alias}」` : ""}` },
+    node("i", { class: `acct-dot avatar-c${h % 8}`, "aria-hidden": "true" }),
+    node("span", { class: "acct-name", text: label }),
+  );
+}
+
 /** 一条会话行（代表信 + 封数徽标）。多封时徽标标出聚合数。 */
 function renderThreadRow(t) {
   const m = t.latest;
@@ -2236,6 +2272,10 @@ function renderThreadRow(t) {
   const picked = state.selected.has(t.key);
   // 多选模式给行一个态：右侧单一控件位从「○ 快速已读」切换为 checkbox
   const selecting = state.selectMode;
+  // 聚合视图 = 跨账号快捷箱（所有收件箱/所有未读…，activeKey = quick:*）
+  // 或全局搜索。以 activeKey 为准——它是侧栏高亮的唯一事实源，
+  // 不依赖 smart/searchQuery 状态对象是否被某条路径及时清掉。
+  const showAcct = state.activeKey.startsWith("quick:") || state.searchQuery !== "";
   return node(
     "button",
     {
@@ -2297,6 +2337,8 @@ function renderThreadRow(t) {
         node(
           "span",
           { class: "row-status" },
+          // 聚合视图（跨账号快捷箱/搜索）标出来自哪个账号；单账号视图不标
+          showAcct ? accountTag(m.account_id) : null,
           ...m.labels.map((l) => node("span", { class: "tag", text: l })),
           m.has_attachments ? node("span", { class: "ic", text: "附件" }) : null,
           m.flags.flagged ? node("span", { class: "ic ic-star", text: "★" }) : null,

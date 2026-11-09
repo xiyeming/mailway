@@ -29,6 +29,7 @@ fn account(smtp: SocketAddr, imap: SocketAddr) -> Account {
     let id = store
         .insert_account(&NewAccount {
             name: "测试",
+            alias: "",
             email: "me@example.com",
             protocol: Protocol::Imap,
             imap_host: &imap.ip().to_string(),

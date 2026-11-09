@@ -23,7 +23,7 @@ use crate::rules::{Action, Condition, Rule};
 use crate::types::*;
 
 /// 当前 schema 版本。以后改表结构要在这里 +`migrations` 里同时加。
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -78,13 +78,14 @@ impl Store {
         let conn = self.lock()?;
         conn.execute(
             "INSERT INTO accounts
-               (name, email, protocol,
+               (name, alias, email, protocol,
                 imap_host, imap_port, imap_security, imap_username,
                 smtp_host, smtp_port, smtp_security, smtp_username,
                 signature, enabled, auth_type, created_at)
-             VALUES (?1,?2,?3, ?4,?5,?6,?7, ?8,?9,?10,?11, ?12,?13,?14,?15)",
+             VALUES (?1,?2,?3,?4, ?5,?6,?7,?8, ?9,?10,?11,?12, ?13,?14,?15,?16)",
             params![
                 a.name,
+                a.alias,
                 a.email,
                 a.protocol,
                 a.imap_host,
@@ -125,6 +126,37 @@ impl Store {
         conn.execute(
             "UPDATE accounts SET signature = ?2 WHERE id = ?1",
             params![id, signature],
+        )?;
+        Ok(())
+    }
+
+    /// 编辑账号：整体更新连接信息（名称/邮箱/协议/收发服务器/登录方式）。
+    /// 签名、启用状态、创建时间不动；授权码在钥匙串里，走 `secrets` 另管。
+    pub fn update_account(&self, id: i64, a: &NewAccount<'_>) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE accounts SET
+               name = ?2, alias = ?3, email = ?4, protocol = ?5,
+               imap_host = ?6, imap_port = ?7, imap_security = ?8, imap_username = ?9,
+               smtp_host = ?10, smtp_port = ?11, smtp_security = ?12, smtp_username = ?13,
+               auth_type = ?14
+             WHERE id = ?1",
+            params![
+                id,
+                a.name,
+                a.alias,
+                a.email,
+                a.protocol,
+                a.imap_host,
+                a.imap_port,
+                a.imap_security,
+                a.imap_username,
+                a.smtp_host,
+                a.smtp_port,
+                a.smtp_security,
+                a.smtp_username,
+                a.auth_type,
+            ],
         )?;
         Ok(())
     }
@@ -1224,6 +1256,7 @@ pub struct LocalMail {
 #[derive(Debug, Clone)]
 pub struct NewAccount<'a> {
     pub name: &'a str,
+    pub alias: &'a str,
     pub email: &'a str,
     pub protocol: Protocol,
     pub imap_host: &'a str,
@@ -1577,6 +1610,12 @@ fn migrate(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    if !has_column(conn, "accounts", "alias")? {
+        conn.execute(
+            "ALTER TABLE accounts ADD COLUMN alias TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
 
     let current: Option<String> = conn
         .query_row(
@@ -1639,6 +1678,14 @@ fn migrate(conn: &Connection) -> Result<()> {
                 params![SCHEMA_VERSION.to_string()],
             )?;
             tracing::info!("数据库 schema 5 → {}", SCHEMA_VERSION);
+        }
+    // v6 → v7：accounts 加 `alias`（聚合列表账号标签的短名）。同上，只抬版本号。
+        Some(v) if v.parse::<i64>().unwrap_or(0) == 6 => {
+            conn.execute(
+                "UPDATE schema_meta SET value = ?1 WHERE key = 'version'",
+                params![SCHEMA_VERSION.to_string()],
+            )?;
+            tracing::info!("数据库 schema 6 → {}", SCHEMA_VERSION);
         }
         Some(v) => {
             // 以后有新迁移就往上加分支。版本对不上只能报错 —— 静默降级比崩溃更危险。
@@ -1737,6 +1784,7 @@ fn row_to_account(r: &Row) -> rusqlite::Result<Account> {
     Ok(Account {
         id: r.get("id")?,
         name: r.get("name")?,
+        alias: r.get("alias").unwrap_or_default(),
         email: r.get("email")?,
         protocol: parse_protocol(&r.get::<_, String>("protocol")?),
         imap_host: r.get("imap_host")?,
