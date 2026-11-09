@@ -210,10 +210,9 @@ function folderUnread(id) {
 }
 function accountUnread(id) {
   const real = (state.counts?.account_unread || []).find(([k]) => k === id)?.[1] ?? 0;
-  // 后端**数到非 0** 才清上界 —— 数到 0 可能是竞态里的旧值（新信刚入库，
-  // 这次 smart_counts 还没数到），误清会让「所有未读」又空掉。
+  // 后端**数到非 0** 才清上界（真读完了）；0 是竞态旧值不清。
   if (real > 0 && unreadHint.has(id)) unreadHint.delete(id);
-  return Math.max(real, unreadHint.get(id) ?? 0);
+  return real;
 }
 function accountFlagged(id) {
   return (state.counts?.account_flagged || []).find(([k]) => k === id)?.[1] ?? 0;
@@ -759,9 +758,7 @@ function renderSidebar() {
           key: `quick:${q.filter}`,
           icon: q.icon,
           name: q.name,
-          count: q.countKey === "all_unread" || q.countKey === "inbox_unread"
-            ? Math.max(c[q.countKey] ?? 0, ...unreadHint.values())
-            : (c[q.countKey] ?? 0),
+          count: c[q.countKey] ?? 0,
           onclick: () => openSmart(q.filter, null, q.name, !!q.isDrafts),
           ctx: (e) => openSmartCtxMenu(e, state.account || state.accounts[0]),
         }),
@@ -858,10 +855,7 @@ function renderSidebar() {
         );
         if (f.kind === "inbox" && !smartDone) {
         for (const s of ACCOUNT_SMART) {
-          const base = s.filter === "unread" ? accountUnread(a.id) : accountFlagged(a.id);
-          const n = s.filter === "unread"
-            ? Math.max(base, unreadHint.get(a.id) ?? 0)
-            : base;
+          const n = s.filter === "unread" ? accountUnread(a.id) : accountFlagged(a.id);
           box.append(
             sidebarRow({
               key: `smart:${s.filter}:${a.id}`,
@@ -3129,6 +3123,17 @@ async function syncNow() {
 async function reloadAfterSync() {
   if (!state.account) return;
   await refreshSidebarData();
+  // 事件给的上界盖到重拉的旧值上（新信入库后这次同步可能还没数到）——
+  // **必须在 renderSidebar 之前**，否则渲染的还是被覆盖的旧值。
+  if (state.counts && unreadHint.size > 0) {
+    for (const [aid, n] of unreadHint) {
+      state.counts.all_unread = Math.max(state.counts.all_unread ?? 0, n);
+      const list = state.counts.account_unread ?? (state.counts.account_unread = []);
+      const u = list.find((x) => x[0] === aid);
+      if (u) u[1] = Math.max(u[1] ?? 0, n);
+      else list.push([aid, n]);
+    }
+  }
   const folders = withDraftsFolder(
     state.allFolders.filter((f) => f.account_id === state.account.id && f.id !== 0),
   );
@@ -3188,7 +3193,8 @@ if (typeof listen === "function") {
     if (p.fetched > 0) {
       toast(`收到 ${p.fetched} 封新邮件`);
     }
-    // 后端随事件带的**当前未读**是权威值，存模块级 Map（重拉旧值盖不回）。
+    // 后端随事件带的**当前未读**是权威上界，存 hint；真正的写入在
+    // reloadAfterSync 重拉**之后**做（那里才渲染，写入不会被覆盖）。
     if (p.account_unread != null && p.account_unread > 0) {
       unreadHint.set(p.account_id, Math.max(unreadHint.get(p.account_id) ?? 0, p.account_unread));
       renderSidebar();
