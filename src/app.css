@@ -719,6 +719,20 @@ body {
   overflow: hidden;
 }
 
+/* 多选中的头部 = 操作条：收紧间距/内边距，窄列表一排放下（不动按钮样式） */
+.pane-head.is-selecting {
+  gap: 0.3rem;
+}
+
+.pane-head.is-selecting .btn {
+  padding: 0.2rem 0.55rem;
+}
+
+/* 空间紧张时文件夹名让位（计数已带上下文） */
+.pane-head.is-selecting .sel-where {
+  display: none;
+}
+
 .pane-head .muted {
   font-weight: 400;
 }
@@ -1126,7 +1140,7 @@ body {
 }
 
 .row {
-  position: relative; /* hover 快速已读按钮的定位上下文 */
+  position: relative;
   display: flex;
   gap: 0.65rem;
   width: 100%;
@@ -1609,31 +1623,27 @@ body {
   background: none;
 }
 
-/* 列表行 hover 快速已读/未读（不打开邮件就改，推服务器） */
+/* 列表行右侧单一控件位（方案 D）：嵌在第一行、紧贴日期左侧。
+   常态 = ○/✓ 快速已读（hover 现身）；多选 = 同一位置变 checkbox。
+   visibility 占位——不 hover 也占着位置，日期列永远不位移。 */
 .row-quick {
-  position: absolute;
-  right: 0.55rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1.65rem;
-  height: 1.65rem;
+  flex-shrink: 0;
+  width: 1.15rem;
+  height: 1.15rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--r-full);
   color: var(--fg-muted);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   background: var(--bg);
   box-shadow: var(--sh-sm);
-  opacity: 0;
-  pointer-events: none;
+  visibility: hidden;
   cursor: pointer;
 }
 
-.row:hover .row-quick,
-.row-quick:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
+.row:hover .row-quick {
+  visibility: visible;
 }
 
 .row-quick:hover {
@@ -2863,6 +2873,14 @@ button:focus-visible,
   font-weight: 600;
 }
 
+/* 底栏按钮：同头部控件的高度节奏（--ctl-h），别比输入框还壮 */
+.dialog-foot .btn {
+  height: var(--ctl-h);
+  padding: 0 0.95rem;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
 /* 对话框里的输入框：高一点、圆一点、聚焦有光环 */
 .dialog-body .input,
 .dialog-body .form-input {
@@ -2958,12 +2976,125 @@ button:focus-visible,
   font-size: var(--fs-sm);
 }
 
+/* 对话框里的分区标签：同侧栏 side-sec 的语汇（muted 小字 + 留白分区） */
+.dlg-sec {
+  margin: 0.35rem 0 -0.35rem;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--fg-faint);
+  letter-spacing: 0.02em;
+}
+
+.dlg-sec:first-child {
+  margin-top: 0;
+}
+
+/* ---- 添加账号（嵌入主区的页面，同设置页架构） ---------------------- */
+.acc-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.acc-page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem 1.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+/* 窄列居中：内容不铺太开，留白分区 */
+.acc-page-form {
+  width: 100%;
+  max-width: 24rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+/* 供应商下拉：同 .more-wrap 定位，菜单贴在输入框下方 */
+.acc-prov-wrap {
+  width: 100%;
+}
+
+.acc-prov-wrap .more-menu {
+  left: 0;
+  right: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+/* 头部：返回 + 标题 + 弹性占位 + 关闭（同设置页头部的控件节奏） */
+.acc-head-gap {
+  flex: 1;
+}
+
+.acc-back,
+.acc-close {
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 0.2rem 0.55rem;
+}
+
+.acc-back:hover,
+.acc-close:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/* 表单 label 上置（页面模式）：去掉对话框的左 label 双列 */
+.acc-page .form-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+}
+
+.acc-page .form-label {
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+.acc-page .form-input {
+  height: 2.25rem;
+}
+
+/* 页面底栏：状态文字 + 右对齐按钮，沉在内容列底部 */
+.acc-page-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 1rem;
+}
+
+.acc-page-foot .dialog-status {
+  color: var(--fg-faint);
+}
+
+.acc-page-foot .btn {
+  height: var(--ctl-h);
+  padding: 0 0.95rem;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.acc-page .adv-toggle {
+  margin: 0 -0.55rem;
+  width: calc(100% + 1.1rem);
+}
+
 /* 添加账号：供应商速选 + 收信协议切换 */
 .acc-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-bottom: 0.85rem;
 }
 
 .acc-chip {
@@ -2978,7 +3109,8 @@ button:focus-visible,
 }
 
 .acc-chip:hover {
-  border-color: var(--accent, #4f6bf6);
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 .proto-btn {
@@ -3520,15 +3652,36 @@ button:focus-visible,
 
 
 /* ================================ 添加账号：高级折叠 ================= */
+/* 高级设置：整行可点的折叠行——左边 muted 标签 + 右边箭头，
+   hover 行底亮，同侧栏行的交互语汇，不像一颗突兀的加粗按钮。 */
 .adv-toggle {
-  align-self: flex-start;
-  padding: 0.25rem 0.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
   border: none;
+  border-radius: var(--r-md);
   background: none;
-  color: var(--accent);
+  color: inherit;
   font: inherit;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
   cursor: pointer;
+}
+
+.adv-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.adv-toggle-label {
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.adv-arrow {
+  color: var(--fg-faint);
+  font-size: var(--fs-xs);
 }
 
 .adv-box {
@@ -3853,66 +4006,29 @@ button:focus-visible,
   background: var(--bg-hover);
 }
 
-.row-pick {
-  flex-shrink: 0;
-  width: 1.15rem;
-  height: 1.15rem;
-  margin-top: 0.4rem;
-  border: 1.5px solid var(--fg-faint);
-  border-radius: var(--r-sm);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--fs-xs);
-  color: var(--accent);
-  background: var(--bg);
-}
-
-.row-pick.is-on {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-fg, #fff);
-}
-
-/* hover 行首浮现的勾选框：盖在头像上（Gmail 式直选入口），点一下即进入多选 */
-.row-pick-hover {
-  position: absolute;
-  left: 0.75rem;
-  top: 9px;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--line);
-  background: var(--bg-active);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  z-index: 2;
-  cursor: pointer;
-}
-
-/* 框内的小空方框 */
-.row-pick-hover::after {
-  content: "";
-  width: 0.9rem;
-  height: 0.9rem;
-  border: 1.5px solid var(--fg-muted);
-  border-radius: var(--r-sm);
-}
-
-.row:hover .row-pick-hover {
-  opacity: 1;
-}
-
-/* hover 时头像让位给勾选框（opacity 不碰布局，不会跳动）。
-   只在非多选态生效——多选态行首常驻的是勾选框，没有 hover 框兜底。 */
-.row.has-hoverpick:hover .avatar {
-  opacity: 0;
-}
-
 .row.is-picked {
   background: var(--bg-active);
+}
+
+/* ---- 行右侧单一控件位（方案 D）：多选态变 checkbox -------------------- */
+.row.is-selecting .row-quick {
+  visibility: visible;
+  border-radius: var(--r-sm);
+  border: 1.5px solid var(--fg-faint);
+  background: var(--bg);
+  box-shadow: none;
+  color: var(--accent-fg);
+  font-size: var(--fs-xs);
+}
+
+.row.is-selecting .row-quick.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 常态 hover 时方形预览：提示这个控件位与多选 checkbox 是同一个位置 */
+.row:not(.is-selecting):hover .row-quick {
+  border-radius: var(--r-sm);
 }
 
 
@@ -4644,8 +4760,13 @@ button.thread-item:hover {
 
 /* 日期在首行右上（D2 样张位置）：推到行尾、tabular 对齐 */
 .row-l1 .date {
-  margin-left: auto;
   font-variant-numeric: tabular-nums;
+}
+
+/* 控件位 + 日期作为一组贴右缘（方案 D）：auto 边距在控件上，
+   日期跟着控件走，中间不出现大空隙 */
+.row-l1 .row-quick {
+  margin-left: auto;
 }
 
 

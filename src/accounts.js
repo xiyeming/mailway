@@ -75,6 +75,14 @@ export function openAccountForm({ onSaved } = {}) {
   return f;
 }
 
+/**
+ * 构建「嵌入主区」的添加账号页（方案 A：与设置页同构，不再是弹窗）。
+ * 由调用方挂进 stage；`onClose` 负责离开本页（返回邮件视图）。
+ */
+export function buildAccountPage({ onSaved, onClose } = {}) {
+  return buildForm(onSaved, { page: { onClose } }).root;
+}
+
 export function closeAccountForm() {
   if (!current) return;
   current.root.remove();
@@ -83,7 +91,14 @@ export function closeAccountForm() {
 
 // ================================================================= 组装
 
-function buildForm(onSaved) {
+function buildForm(onSaved, opts = {}) {
+  // 两种容器：对话框（scrim 小窗）或嵌入主区的页面（方案 A，同设置页架构）。
+  // 页面模式没有「点外面关掉」——返回键/✕/取消负责退出。
+  const asPage = !!opts.page;
+  const dismiss = () => {
+    if (asPage) opts.page.onClose?.();
+    else closeAccountForm();
+  };
   // 登录方式：默认授权码；「Google 登录」后改 `xoauth2`（`password` 里放的是 token）。
   let authType = "password";
   // 收信协议：IMAP（默认）或 POP3。收发服务器字段两套协议共用，
@@ -249,7 +264,8 @@ function buildForm(onSaved) {
     }
   }
 
-  // 高级设置（默认收起）：用户名/协议/主机端口都在这里
+  // 高级设置（默认收起）：整行可点，语汇同侧栏行——左边 muted 标签 + 右边
+  // 箭头，hover 行底亮，不是一颗突兀的加粗按钮。
   const adv = node("div", { class: "adv-box", hidden: true },
     node("fieldset", { class: "form-group" },
       node("legend", { class: "form-legend", text: "收信" }),
@@ -264,17 +280,19 @@ function buildForm(onSaved) {
     ),
     testBtn,
   );
-  const advLabel = node("span", { text: "高级设置" });
   const advArrow = node("span", { class: "adv-arrow", "aria-hidden": "true", text: "▾" });
   const advToggle = node("button", {
-    class: "btn adv-toggle", type: "button", id: "btn-adv",
+    class: "adv-toggle", type: "button", id: "btn-adv",
     "aria-expanded": "false",
     onclick: () => {
       adv.hidden = !adv.hidden;
       advToggle.setAttribute("aria-expanded", String(!adv.hidden));
       advArrow.textContent = adv.hidden ? "▾" : "▴";
     },
-  }, advLabel, advArrow);
+  },
+    node("span", { class: "adv-toggle-label", text: "高级设置" }),
+    advArrow,
+  );
 
   // 主按钮统一「登录」：Gmail 域名时同位置变「使用 Google 登录」（OAuth），
   // 不再有独立的 Google 按钮。
@@ -284,29 +302,115 @@ function buildForm(onSaved) {
   };
   email.addEventListener("input", updateLoginBtn);
 
-  const root = node("div", { class: "scrim", role: "dialog", "aria-label": "添加账号" },
+  // ---- 供应商速选 -----------------------------------------------------
+  // 对话框里是一排胶囊；页面里是同侧栏行语汇的行列表（hover 底 / 选中高亮 /
+  // 右侧域名提示）。选哪家都一样：补邮箱后缀 + 提示语。
+  const pickProvider = (domain, hint) => {
+    if (domain) {
+      const local = email.value.split("@")[0].trim();
+      email.value = local ? `${local}@${domain}` : `@${domain}`;
+      updateLoginBtn();
+      applyAutoconfig();
+    }
+    status.textContent = hint || "";
+    email.focus();
+  };
+  const markPicked = (btn) => {
+    btn.parentElement?.querySelectorAll(".is-on").forEach((b) => b.classList.remove("is-on"));
+    btn.classList.add("is-on");
+  };
+  const providerChips = node("div", { class: "acc-chips", role: "group", "aria-label": "常用邮箱" },
+    PROVIDERS.map(([label, domain, hint]) =>
+      node("button", {
+        class: "btn acc-chip", type: "button", text: label,
+        onclick: (e) => { markPicked(e.currentTarget); pickProvider(domain, hint); },
+      }),
+    ),
+  );
+  // 页面模式：下拉列表（同设置页 customSelect 语汇：输入框形态 + ▾ + more-menu）。
+  // accounts.js 引不到 app.js 的 customSelect（循环依赖），这里做一个同款的
+  // 轻量版——样式类完全复用 .custom-select / .more-menu / .more-wrap。
+  const provMenu = node("div", { class: "more-menu", hidden: true, role: "listbox", "aria-label": "常用邮箱" },
+    PROVIDERS.map(([label, domain, hint]) =>
+      node("button", {
+        class: "more-item", type: "button", role: "option", text: label,
+        onclick: () => {
+          provMenu.hidden = true;
+          provBtn.setAttribute("aria-expanded", "false");
+          provBtn.querySelector(".cs-label").textContent = label;
+          pickProvider(domain, hint);
+        },
+      }),
+    ),
+  );
+  const provBtn = node("button", {
+    class: "form-input custom-select", type: "button",
+    "aria-haspopup": "listbox", "aria-expanded": "false",
+    onclick: (e) => {
+      e.stopPropagation();
+      const open = provMenu.hidden;
+      provMenu.hidden = !open;
+      provBtn.setAttribute("aria-expanded", String(open));
+    },
+  },
+    node("span", { class: "cs-label", text: "选择邮箱" }),
+    node("span", { class: "cs-caret", "aria-hidden": "true", text: "▾" }),
+  );
+  const providerSelect = node("div", { class: "more-wrap acc-prov-wrap" }, provBtn, provMenu);
+
+  const root = asPage
+    ? node("div", { class: "acc-page" },
+        node("header", { class: "pane-head" },
+          node("button", {
+            class: "btn acc-back", type: "button", text: "←",
+            title: "返回", "aria-label": "返回",
+            onclick: () => opts.page.onClose?.(),
+          }),
+          node("span", { text: "添加账号" }),
+          node("span", { class: "acc-head-gap", "aria-hidden": "true" }),
+          node("button", {
+            class: "btn acc-close", type: "button", text: "✕",
+            title: "关闭（Esc）", "aria-label": "关闭",
+            onclick: () => opts.page.onClose?.(),
+          }),
+        ),
+        node("div", { class: "acc-page-body" },
+          node("form", { class: "acc-page-form", onsubmit: onSubmit },
+            node("div", { class: "dlg-sec", text: "选择邮箱" }),
+            providerSelect,
+            node("div", { class: "dlg-sec", text: "账号信息" }),
+            node("div", { class: "form-grid" },
+              field("acc-name", "名称", name),
+              field("acc-email", "邮箱", email),
+              field("acc-pass", "授权码", password),
+              node("p", {
+                class: "form-hint",
+                text: "授权码不是登录密码：各家邮箱要先在网页版单独生成（Gmail 无需授权码，直接登录）。",
+              }),
+            ),
+            advToggle,
+            adv,
+            node("div", { class: "acc-page-foot" },
+              status,
+              node("button", {
+                class: "btn", type: "button", text: "取消",
+                onclick: () => opts.page.onClose?.(),
+              }),
+              saveBtn,
+            ),
+          ),
+        ),
+      )
+    : node("div", { class: "scrim", role: "dialog", "aria-label": "添加账号" },
     node("form", { class: "dialog acc-dialog", onsubmit: onSubmit },
       node("header", { class: "dialog-head" },
         node("h2", { class: "dialog-title", text: "添加账号" }),
       ),
       node("div", { class: "dialog-body" },
-        node("div", { class: "acc-chips", role: "group", "aria-label": "常用邮箱" },
-          PROVIDERS.map(([label, domain, hint]) =>
-            node("button", {
-              class: "btn acc-chip", type: "button", text: label,
-              onclick: () => {
-                if (domain) {
-                  const local = email.value.split("@")[0].trim();
-                  email.value = local ? `${local}@${domain}` : `@${domain}`;
-                  updateLoginBtn();
-                  applyAutoconfig();
-                }
-                status.textContent = hint || "";
-                email.focus();
-              },
-            }),
-          ),
-        ),
+        // 分区标签：同侧栏 side-sec 的语汇（muted 小字 + 留白分区，不画线）
+        node("div", { class: "dlg-sec", text: "常用邮箱" }),
+        providerChips,
+        node("div", { class: "dlg-sec", text: "账号信息" }),
         node("div", { class: "form-grid" },
           field("acc-name", "名称", name),
           field("acc-email", "邮箱", email),
@@ -337,15 +441,24 @@ function buildForm(onSaved) {
   root.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
-      closeAccountForm();
+      dismiss();
     }
   });
 
-  // 点弹窗外面 = 关掉（焦点丢了也能一下解脱，不会卡在弹窗上）；
-  // 点弹窗里面不关（靠 `e.target === root` 判定，不用子元素 stopPropagation）。
-  root.addEventListener("mousedown", (e) => {
-    if (e.target === root) closeAccountForm();
-  });
+  // 页面模式没有「点外面关掉整页」，但供应商下拉的菜单要收——
+  // 点在下拉以外任何地方都关。
+  if (asPage) {
+    root.addEventListener("mousedown", (e) => {
+      if (!e.target.closest || !e.target.closest(".acc-prov-wrap")) {
+        provMenu.hidden = true;
+        provBtn.setAttribute("aria-expanded", "false");
+      }
+    });
+  } else {
+    root.addEventListener("mousedown", (e) => {
+      if (e.target === root) closeAccountForm();
+    });
+  }
 
   function onSubmit(e) {
     // 表单用 <form> 是为了「回车就提交」；真提交得拦掉，页面不能跳走。
@@ -373,7 +486,7 @@ function buildForm(onSaved) {
     status.textContent = "正在保存…";
     try {
       const account = await invoke("create_account", { input });
-      closeAccountForm();
+      dismiss();
       onSaved?.(account);
     } catch (err) {
       // 这段文本来自 `create_account`，那边保证不含密码（见文件头）。

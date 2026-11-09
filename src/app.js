@@ -15,7 +15,7 @@
 
 import { node, clear, flipMenuOverflow, placeMenuAt } from "./dom.js";
 import { openCompose } from "./compose.js";
-import { openAccountForm } from "./accounts.js";
+import { buildAccountPage } from "./accounts.js";
 
 const invoke = globalThis.__TAURI__?.core?.invoke;
 
@@ -323,20 +323,11 @@ function renderNoAccount() {
 }
 
 /**
- * 添加账号。加完切过去，顺手收一次信 —— 建完账号还得自己想起来点「收信」
- * 才看得到邮件，是新用户最容易卡住的一步。
+ * 添加账号。整页嵌入主区（同设置页），加完切过去，顺手收一次信 ——
+ * 建完账号还得自己想起来点「收信」才看得到邮件，是新用户最容易卡住的一步。
  */
 function addAccount() {
-  openAccountForm({
-    onSaved: async (account) => {
-      // 重新拉一遍而不是 push：库里那行才是真的（id、时间都是它给的），
-      // 而且万一哪天 create_account 顺手做了点别的（补默认文件夹之类），
-      // 这里不用跟着改。
-      state.accounts = await invoke("list_accounts");
-      await useAccount(account);
-      syncNow();
-    },
-  });
+  switchMode("addaccount");
 }
 
 function renderError(err) {
@@ -442,6 +433,7 @@ function renderStage() {
   if (state.mode === "contacts") return buildContacts(stage);
   if (state.mode === "calendar") return buildCalendar(stage);
   if (state.mode === "settings") return buildSettings(stage);
+  if (state.mode === "addaccount") return buildAddAccount(stage);
   return buildMail(stage);
 }
 
@@ -462,6 +454,24 @@ async function switchMode(mode) {
   } else if (mode === "settings") {
     await loadSettings();
   }
+}
+
+/**
+ * 添加账号页（方案 A：嵌入主区，同设置页架构，不再是弹窗）。
+ * 保存成功 → 回邮件视图并切到新账号 + 收一次信；返回/✕/取消/Esc → 回邮件视图。
+ */
+function buildAddAccount(stage) {
+  stage.append(
+    buildAccountPage({
+      onSaved: async (account) => {
+        state.accounts = await invoke("list_accounts");
+        await switchMode("mail");
+        await useAccount(account);
+        syncNow();
+      },
+      onClose: () => switchMode("mail"),
+    }),
+  );
 }
 
 /** 邮件三栏（原有的 folders / list / reader）。 */
@@ -1579,9 +1589,12 @@ function renderSelectBar() {
   const threads = groupIntoThreads(state.messages);
   const n = state.selected.size;
 
-  // 头部常规控件：多选中让位，退出后恢复
+  // 头部常规控件：多选中让位，退出后恢复。同时给头部挂 is-selecting：
+  // 窄列表时操作条允许横向滚动，别把 ✕ 裁掉。
+  const head = bar.closest(".pane-head");
   const standard = ["btn-filter", "list-title", "list-count", "btn-read-all", "btn-select"]
     .map((id) => document.getElementById(id));
+  if (head) head.classList.toggle("is-selecting", state.selectMode);
   if (!state.selectMode) {
     for (const el of standard) if (el) el.hidden = false;
     return;
@@ -1614,7 +1627,18 @@ function renderSelectBar() {
       ...noAct,
       onclick: () => batchStar(!allFlagged),
     }),
-    node("button", { class: "btn", type: "button", text: "移动 ▾", ...noAct, onclick: batchMoveMenu }),
+    node("button", {
+      class: "btn", type: "button", text: "移动 ▾",
+      // aria-haspopup 不只是语义：全局「点外面关菜单」监听会豁免它——
+      // 没有这个属性，点开菜单的同一个点击冒泡到 document 又被当场关掉。
+      "aria-haspopup": "true",
+      "aria-expanded": "false",
+      ...noAct,
+      onclick: (e) => {
+        e.currentTarget.setAttribute("aria-expanded", "true");
+        batchMoveMenu(e);
+      },
+    }),
     node("button", {
       class: "btn btn-danger", type: "button",
       text: inTrash ? "永久删除" : "删除",
@@ -1633,7 +1657,7 @@ function renderSelectBar() {
       },
     }),
     node("button", {
-      class: "btn sel-exit", type: "button", text: "✕", title: "退出多选（Esc）",
+      class: "btn sel-exit", type: "button", text: "✕",
       "aria-label": "退出多选", onclick: clearSelection,
     }),
   );
@@ -1958,6 +1982,7 @@ async function batchDeleteIds(ids) {
     updateListCount();
     renderReader();
     toast(`已删除 ${ids.length} 封`);
+    await refreshCounts();
   } catch (err) {
     toast(`删除失败：${err instanceof Error ? err.message : err}`);
   }
@@ -1973,6 +1998,7 @@ async function purgeIds(ids) {
     updateListCount();
     renderReader();
     toast(`已彻底删除 ${ids.length} 封`);
+    await refreshCounts();
   } catch (err) {
     toast(`删除失败：${err instanceof Error ? err.message : err}`);
   }
@@ -2208,12 +2234,12 @@ function renderThreadRow(t) {
     (state.thread && state.thread.key != null && t.key != null && state.thread.key === t.key) ||
     (state.messageId != null && t.messages.some((x) => x.id === state.messageId));
   const picked = state.selected.has(t.key);
-  // 多选模式：所有行都亮勾选框；没有勾选时 hover 行首浮现一个
+  // 多选模式给行一个态：右侧单一控件位从「○ 快速已读」切换为 checkbox
   const selecting = state.selectMode;
   return node(
     "button",
     {
-      class: `row${unread ? " is-unread" : ""}${sel ? " is-sel" : ""}${picked ? " is-picked" : ""}${!selecting ? " has-hoverpick" : ""}`,
+      class: `row${unread ? " is-unread" : ""}${sel ? " is-sel" : ""}${picked ? " is-picked" : ""}${selecting ? " is-selecting" : ""}`,
       type: "button",
       role: "listitem",
       "aria-current": sel ? "true" : "false",
@@ -2227,23 +2253,7 @@ function renderThreadRow(t) {
       },
       oncontextmenu: (e) => openMessageCtxMenu(e, t),
     },
-    // 多选中：行首常驻勾选框
-    selecting
-      ? node("span", { class: `row-pick${picked ? " is-on" : ""}`, "aria-hidden": "true", text: picked ? "✓" : "" })
-      : null,
     renderAvatar(m.from?.[0] ?? {}),
-    // 非多选时 hover 浮现的勾选框（盖在头像上，点一下即进入多选）
-    !selecting
-      ? node("span", {
-          class: "row-pick-hover", role: "button", tabindex: "-1",
-          title: "选择此会话（进入多选）", "aria-label": "选择此会话",
-          onclick: (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            togglePick(t);
-          },
-        })
-      : null,
     node(
       "div",
       { class: "row-main" },
@@ -2253,6 +2263,30 @@ function renderThreadRow(t) {
         node("span", { class: `dot${unread ? "" : " is-off"}`, "aria-hidden": "true" }),
         node("span", { class: "from", text: fmtSender(m.from[0] ?? {}) }),
         m.thread_count > 1 ? node("span", { class: "thread-count", text: String(m.thread_count) }) : null,
+        // 行右侧单一控件位（方案 D，控件合一）：嵌在第一行、紧贴日期左侧。
+        //   常态  = ○/✓ 快速已读（hover 现身；Shift+点击 = 进入多选并选中本行）
+        //   多选  = 同一位置变 checkbox（选中实心 ✓，点击 = 勾选/取消）
+        // visibility 占位：不 hover 时隐藏但占着位置，日期列永远不动。
+        node("span", {
+          class: `row-quick${selecting ? " is-check" : ""}${picked ? " is-on" : ""}`,
+          role: "button",
+          tabindex: "-1",
+          title: selecting
+            ? (picked ? "取消选择" : "选择此会话")
+            : (unread ? "标为已读 · Shift+点击多选" : "标为未读 · Shift+点击多选"),
+          "aria-label": selecting ? "选择此会话" : (unread ? "标为已读" : "标为未读"),
+          text: selecting ? (picked ? "✓" : "") : (unread ? "✓" : "○"),
+          onclick: (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (selecting || e.shiftKey) {
+              togglePick(t);
+              return;
+            }
+            // 有未读 → 全标已读；全已读 → 全标未读（会话整会话一起）
+            quickMarkRead(t, unread);
+          },
+        }),
         node("span", { class: "date", text: fmtRowDate(m.date || m.received_at) }),
       ),
       node("span", { class: "subject", text: m.subject || "（无主题）" }),
@@ -2270,24 +2304,6 @@ function renderThreadRow(t) {
         ),
       ),
     ),
-    // 快速已读/未读：不打开邮件就改标志（会话整会话一起），并推回服务器。
-    // 多选进行中不画——那时点行是勾选，✓/○ 留在原地容易误触。
-    !selecting
-      ? node("span", {
-          class: `row-quick${unread ? "" : " is-seen"}`,
-          role: "button",
-          tabindex: "0",
-          title: unread ? "标为已读（同步到服务器）" : "标为未读（同步到服务器）",
-          "aria-label": unread ? "标为已读" : "标为未读",
-          text: unread ? "✓" : "○",
-          onclick: (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            // 有未读 → 全标已读；全已读 → 全标未读（会话整会话一起）
-            quickMarkRead(t, unread);
-          },
-        })
-      : null,
   );
 }
 
@@ -2356,16 +2372,30 @@ function resetSelect() {
 
 // ================================================================= 右栏
 
+/** 元素在阅读区内容坐标系里的顶部位置（含滚动，跨重画可比）。 */
+function readerContentTop(el) {
+  const reader = document.getElementById("reader");
+  if (!reader || !el) return 0;
+  return el.getBoundingClientRect().top - reader.getBoundingClientRect().top + reader.scrollTop;
+}
+
 async function openMessage(messageId) {
+  // 展开锚点：被点的信当前在视口里的位置。会话里展开另一封时，上一封展开的
+  // 会塌缩、整体高度变化，「像素还原」会让视口平移、看到别的信——
+  // 所以锚的是**这封信的视口位置**，重画后让它待在原处。
+  let expandAnchor = null;
+  {
+    const reader = document.getElementById("reader");
+    const el = reader?.querySelector(`[data-mid="${messageId}"]`);
+    if (el) expandAnchor = readerContentTop(el) - reader.scrollTop;
+  }
   state.messageId = messageId;
   // 旧会话先清掉：它还指着上一行，和新 messageId 一起会把两行都点亮
   // （「点一行亮两行」的真凶——上次打开的行 + 这次点的行）。
+  // 注意：**不清空阅读区**——旧内容留到新的就绪再整体换，免得点一封
+  // 闪一下白（清空→加载中→重建 在 WebKitGTK 里必丢一帧）。
   state.thread = null;
-  repaintList();
   document.querySelector(".shell")?.classList.add("is-reading");
-
-  const reader = clear(document.getElementById("reader"));
-  reader.append(node("p", { class: "empty", text: "加载中…" }));
 
   try {
     const detail = await invoke("open_message", { message_id: messageId });
@@ -2378,7 +2408,6 @@ async function openMessage(messageId) {
       const row = state.messages.find((x) => x.id === messageId);
       if (row) row.flags = flags;
       detail.summary.flags = flags;
-      repaintList();
       // 角标跟上（不阻塞阅读：后台刷）
       refreshCounts().catch(() => {});
     }
@@ -2396,13 +2425,19 @@ async function openMessage(messageId) {
       }
     }
     state.thread = { key: tk, messages: members };
-    // 会话到位后再定一次选中态（加载期间的临时状态收尾）
+    // 内容齐了再一次画：选中高亮 + 未读点 + 阅读区。中途不反复重建列表，
+    // 减少长任务丢帧（白屏的根源）。
     repaintList();
     renderReader();
+    // 展开锚点还原：被点那封待在点击前的视口位置
+    if (expandAnchor != null) {
+      const reader = document.getElementById("reader");
+      const el = reader?.querySelector(`[data-mid="${messageId}"]`);
+      if (el) reader.scrollTop = readerContentTop(el) - expandAnchor;
+    }
   } catch (err) {
-    clear(reader).append(
-      node("p", { class: "error" }, `打不开这封邮件：${err instanceof Error ? err.message : err}`),
-    );
+    // 打开失败不动现有内容（旧信还摊在那儿），只提示
+    statusNote(`打不开这封邮件：${err instanceof Error ? err.message : err}`);
   }
 }
 
@@ -2422,7 +2457,14 @@ async function openExternal(url) {
 }
 
 function renderReader() {
-  const reader = clear(document.getElementById("reader"));
+  const reader = document.getElementById("reader");
+  // 锚点：同一会话的重画（标已读/未读、展开另一封）保持滚动位置——
+  // 内容在滚动点以上的部分没变，px 级还原即可；换了会话/邮件才回顶。
+  // dataset 里存的是**上一次画的是哪个会话**，跟当前 state 比。
+  const curKey = state.thread?.key ?? "";
+  const keepScroll = curKey !== "" && reader.dataset.threadKey === curKey;
+  const prevScroll = keepScroll ? reader.scrollTop : 0;
+  clear(reader);
   const title = document.getElementById("reader-title");
 
   const msgs = state.thread?.messages?.length
@@ -2434,6 +2476,7 @@ function renderReader() {
   if (!active && msgs.length === 0) {
     title.textContent = "阅读";
     reader.append(node("p", { class: "empty" }, "左侧选一封邮件开始阅读。"));
+    reader.dataset.threadKey = curKey;
     return;
   }
 
@@ -2451,6 +2494,9 @@ function renderReader() {
     stack.append(isActive ? renderActiveItem(active) : renderCollapsedItem(m));
   }
   reader.append(stack);
+  // 记录本次画的会话 key + 还原滚动锚点（见函数开头）
+  reader.dataset.threadKey = curKey;
+  if (keepScroll) reader.scrollTop = prevScroll;
 }
 
 /** 展开的那封：信头卡片 + 标签 + 远程图横幅 + 正文 + 附件。 */
@@ -2458,7 +2504,7 @@ function renderActiveItem(d) {
   const s = d.summary;
   return node(
     "div",
-    { class: "thread-item is-open", role: "listitem" },
+    { class: "thread-item is-open", role: "listitem", "data-mid": String(s.id) },
     renderMsgHead(d),
     renderMarkTools(s),
     // 远程图片横幅
@@ -2535,6 +2581,7 @@ function renderCollapsedItem(m) {
       class: "thread-item",
       type: "button",
       role: "listitem",
+      "data-mid": String(m.id),
       onclick: () => openMessage(m.id),
     },
     renderAvatar(m.from?.[0] ?? {}),
@@ -2648,7 +2695,14 @@ async function showRemoteImages() {
   if (!state.messageId) return;
   try {
     await invoke("allow_remote_images", { message_id: state.messageId });
-    await openMessage(state.messageId);
+    // 只重取这一封的正文，**局部**换掉展开卡——不走 open_message 整封重开
+    // （那个会把阅读区清成「加载中…」、重拉整个会话、闪一下全页）。
+    const detail = await invoke("open_message", { message_id: state.messageId });
+    state.detail = detail;
+    const reader = document.getElementById("reader");
+    const old = reader?.querySelector(`[data-mid="${state.messageId}"]`);
+    if (reader && old) old.replaceWith(renderActiveItem(detail));
+    else renderReader(); // 展开卡不在 DOM（异常态）才退回整体重画
   } catch (err) {
     alert(`放行失败：${err instanceof Error ? err.message : err}`);
   }
@@ -2909,6 +2963,7 @@ async function moveMessage(messageId, toFolderId) {
     repaintList();
     renderReader();
     updateListCount();
+    await refreshCounts();
     statusNote("已挪到目标文件夹");
   } catch (err) {
     statusNote(`挪箱失败：${err instanceof Error ? err.message : err}`);
@@ -3014,6 +3069,7 @@ async function deleteMessage(messageId, permanent) {
     renderReader();
     updateListCount();
     statusNote(permanent ? "已彻底删除" : "已移到废纸篓");
+    await refreshCounts();
   } catch (err) {
     statusNote(`删除失败：${err instanceof Error ? err.message : err}`);
   }
@@ -3029,6 +3085,8 @@ async function markAllRead() {
     repaintList();
     renderReader();
     updateListCount();
+    // 角标跟上：这个文件夹的未读清零了，不刷侧栏就一直挂着旧数
+    await refreshCounts();
   } catch (err) {
     statusNote(`标已读失败：${err instanceof Error ? err.message : err}`);
   }
