@@ -2381,7 +2381,7 @@ dependencies = [
 
 [[package]]
 name = "mailway"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2402,7 +2402,7 @@ dependencies = [
 
 [[package]]
 name = "mailway-core"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "ammonia",
  "anyhow",
