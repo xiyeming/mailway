@@ -1335,7 +1335,15 @@ function recipientField({ label, placeholder, onChange }) {
       }
     },
     onblur: () => {
-      commit();
+      // 失焦**不自动提交**裸词——之前 blur 即 commit，打字时焦点一晃就把
+      // 半个词（"xi"）变成 chip（"自动触发未联系人"）。只有**完整邮箱**才
+      // 顺手收下；半截词留着，回来接着打。
+      const v = input.value.trim();
+      if (v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+        push(v);
+        input.value = "";
+        touch();
+      }
       // 延后藏，给 mousedown 选中留个缝
       setTimeout(hideSuggest, 150);
     },
@@ -1465,8 +1473,16 @@ function recipientField({ label, placeholder, onChange }) {
   };
 }
 
-/** `张三 <a@b.com>` → `{display, address}`。认不出就整串当地址。 */
+/** `张三 <a@b.com>` → `{display, address}`。认不出就整串当地址。
+ *  也收 `{display, address}` 对象（联系人补全那路直接递对象进来）。 */
 function parseMailbox(raw) {
+  // 对象入口：联系人补全的 mousedown 递的是 `{display, address}`。
+  // 早期没兜这条，`({}).trim()` 直接 TypeError，点补全永远没反应。
+  if (raw !== null && typeof raw === "object") {
+    const address = (raw.address ?? "").trim();
+    if (!address) return null;
+    return { display: raw.display || null, address };
+  }
   const s = (raw ?? "").trim();
   if (!s) return null;
   const m = s.match(/^(.*?)<([^<>]+)>\s*$/);

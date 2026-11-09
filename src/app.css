@@ -35,7 +35,7 @@
   --warn-fg: #7a5b12;
 
   --pane-folders: 220px;
-  --pane-list: 360px;
+  --pane-list: 440px;
 
   --font: system-ui, -apple-system, "Noto Sans CJK SC", "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -3771,41 +3771,93 @@ button:focus-visible,
 
 
 /* ================================ 多选操作条 / 行勾选 ================= */
+/* 操作区住在 .pane-head 里（app.js 结构），display:contents 使其子项直接
+   成为头部 flex 项——多选中头部这一行**就是**操作条，没有第二条栏。
+   空的时候（非多选）不产生任何盒，头部恢复常规控件。 */
 .select-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.45rem 0.65rem;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-sunken);
-  flex-wrap: wrap;
+  display: contents;
 }
 
-.select-bar[hidden] {
-  display: none;
-}
-
+/* 计数文字：同列表头 muted 的语汇 */
 .select-bar .sel-count {
+  color: var(--fg);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 折进来的文件夹名（多选中替代标题） */
+.select-bar .sel-where {
   color: var(--fg-muted);
   font-size: var(--fs-sm);
-  min-width: 4.5rem;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 9rem;
 }
 
-.select-bar .sel-sep {
-  width: 1px;
-  height: 1.1rem;
-  background: var(--line);
+/* 右侧弹性占位 + 末尾两个低强调钮 */
+.select-bar .sel-flex {
+  flex: 1;
 }
 
 .select-bar .btn {
-  padding: 0.28rem 0.7rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
   font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.select-bar .btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.select-bar .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 主动作（标为已读/未读）：实心强调，同主题的主按钮语汇 */
+.select-bar .act-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.select-bar .act-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+  color: var(--accent-fg);
+}
+
+/* 危险动作：只换字色，不加额外的框/底 */
+.select-bar .btn-danger {
+  color: var(--danger);
+}
+
+.select-bar .sel-all,
+.select-bar .sel-exit {
+  border-color: transparent;
+  background: transparent;
+}
+
+.select-bar .sel-all:hover:not(:disabled),
+.select-bar .sel-exit:hover:not(:disabled) {
+  background: var(--bg-hover);
 }
 
 .row-pick {
   flex-shrink: 0;
   width: 1.15rem;
   height: 1.15rem;
+  margin-top: 0.4rem;
   border: 1.5px solid var(--fg-faint);
   border-radius: var(--r-sm);
   display: inline-flex;
@@ -3820,6 +3872,43 @@ button:focus-visible,
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-fg, #fff);
+}
+
+/* hover 行首浮现的勾选框：盖在头像上（Gmail 式直选入口），点一下即进入多选 */
+.row-pick-hover {
+  position: absolute;
+  left: 0.75rem;
+  top: 9px;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--bg-active);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  z-index: 2;
+  cursor: pointer;
+}
+
+/* 框内的小空方框 */
+.row-pick-hover::after {
+  content: "";
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 1.5px solid var(--fg-muted);
+  border-radius: var(--r-sm);
+}
+
+.row:hover .row-pick-hover {
+  opacity: 1;
+}
+
+/* hover 时头像让位给勾选框（opacity 不碰布局，不会跳动）。
+   只在非多选态生效——多选态行首常驻的是勾选框，没有 hover 框兜底。 */
+.row.has-hoverpick:hover .avatar {
+  opacity: 0;
 }
 
 .row.is-picked {

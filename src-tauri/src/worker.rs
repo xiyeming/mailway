@@ -400,31 +400,36 @@ fn notify_new_mail(app: &tauri::AppHandle, account_id: i64, outs: &[FolderSync])
 }
 
 fn emit(app: &tauri::AppHandle, store: &Store, account_id: i64, fetched: u32, broken: u32, flags_changed: u32, rebuilt: u32) {
-    // 事件里**带上这个账号的最新未读数**。前端刚收到新信时自己再算
-    // `smart_counts` 可能还是旧值（同步入库在前端可见之前完成，时序不一
-    // 致），这种竞态下「所有未读」角标就是空的 —— 后端算好随事件下发最稳。
-    let unread = store
-        .list_messages(
-            store
-                .list_folders(account_id)
-                .unwrap_or_default()
-                .into_iter()
-                .find(|f| f.kind == mailway_core::types::FolderKind::Inbox)
-                .map(|f| f.id)
-                .unwrap_or(0),
-            1_000_000,
-            0,
-        )
-        .map(|ms| ms.iter().filter(|m| !m.flags.seen).count() as u32)
-        .unwrap_or(0);
+    // 事件里**带上权威角标**（同步已提交后才发事件，这批 COUNT 就是最新值）。
+    // 前端自己不重算——它此刻重查 `smart_counts` 理论上也是新值，但让事件自
+    // 洽（带全量字段）可以省掉前端那一堆「重拉竞态盖掉事件计数」的补丁。
+    // 注意要**全账号未读**（不只 INBOX——新信可能落在任何箱子，只数 INBOX
+    // 会漏，account_unread 偏小，角标加不上去）。
+    let (account_unread, all_unread, inbox_unread, folder_unread) =
+        match store.smart_counts() {
+            Ok(c) => {
+                let acc = c
+                    .account_unread
+                    .iter()
+                    .find(|(id, _)| *id == account_id)
+                    .map(|(_, n)| *n as u32)
+                    .unwrap_or(0);
+                (acc, c.all_unread as u32, c.inbox_unread as u32, c.folder_unread)
+            }
+            Err(_) => (0, 0, 0, Vec::new()),
+        };
     let payload = serde_json::json!({
         "account_id": account_id,
         "fetched": fetched,
         "broken": broken,
         "flags_changed": flags_changed,
         "rebuilt": rebuilt,
-        "account_unread": unread,
+        "account_unread": account_unread,
+        "all_unread": all_unread,
+        "inbox_unread": inbox_unread,
+        "folder_unread": folder_unread,
     });
+    tracing::info!("EMIT sync account={} unread={} fetched={}", account_id, account_unread, fetched);
     if let Err(e) = app.emit(EVENT_SYNC_CHANGED, payload) {
         // 前端还没起来 / 窗口关了，都属于正常，别当错误处理
         tracing::debug!("发同步事件失败（前端可能还没就绪）: {e}");

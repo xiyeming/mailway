@@ -30,11 +30,6 @@ if (typeof invoke !== "function") {
 
 // ================================================================= 状态
 
-/** 后端事件带的未读上界（账号 id → 未读数），模块级不被 state 重赋值清掉。
- * 新信入库在前端 smart_counts 可见之前完成（同步在另一连接），重拉是旧值，
- * 渲染取 max(smart_counts, 这里) —— 「所有未读」收到新信却空着的根因。 */
-const unreadHint = new Map();
-
 const state = {
   account: null,
   /** 折叠的文件夹 id（子文件夹树）。 */
@@ -60,9 +55,13 @@ const state = {
   unreadOnly: false,
   /** 所有账号的文件夹（侧栏账号树）。 */
   allFolders: [],
-  /** 多选：选中的是 thread key（行），动作时展开成 message id。 */
-  selected: new Set(),
+  /** 多选：选中的是 thread key（行），动作时展开成 message id。
+   *  selectMode = 模式开关（hover 行首勾选框进入，✕/Esc 退出）；
+   *  「取消全选」只清 selected，**不关模式**——按钮随即变回「全选」。 */
   selectMode: false,
+  selected: new Set(),
+  /** Shift 连选的锚点：最近一次点选的 thread key。 */
+  selectAnchor: null,
   /** `smart_counts()` 的结果（侧栏角标）。 */
   counts: null,
   /** 侧栏当前高亮项的 key（文件夹/智能箱/快捷箱）。 */
@@ -87,7 +86,6 @@ const state = {
 };
 // 调试/测试观测窗（生产无影响）
 window.__MAILWAY_STATE__ = state;
-
 
 // ================================================================= 格式化
 
@@ -168,7 +166,7 @@ function initPaneSplitters() {
 function persistPaneWidths() {
   const cs = getComputedStyle(document.documentElement);
   const fw = parseInt(cs.getPropertyValue("--pane-folders"), 10) || 220;
-  const lw = parseInt(cs.getPropertyValue("--pane-list"), 10) || 360;
+  const lw = parseInt(cs.getPropertyValue("--pane-list"), 10) || 440;
   invoke("set_setting", { key: "pane_folders_w", value: String(fw) }).catch(() => {});
   invoke("set_setting", { key: "pane_list_w", value: String(lw) }).catch(() => {});
 }
@@ -193,7 +191,7 @@ function toggleAccountCollapse(id) {
 }
 
 /** 改完已读/星标后刷新侧栏角标：计数是 smart_counts 聚合出来的，
- *  不重新拉就会一直显示旧数（「全标已读」后角标不动的根因）。 */
+ *  不重新拉就会一直显示旧数。 */
 async function refreshCounts() {
   await refreshSidebarData();
   renderSidebar();
@@ -209,10 +207,7 @@ function folderUnread(id) {
   return (state.counts?.folder_unread || []).find(([k]) => k === id)?.[1] ?? 0;
 }
 function accountUnread(id) {
-  const real = (state.counts?.account_unread || []).find(([k]) => k === id)?.[1] ?? 0;
-  // 后端**数到非 0** 才清上界（真读完了）；0 是竞态旧值不清。
-  if (real > 0 && unreadHint.has(id)) unreadHint.delete(id);
-  return real;
+  return (state.counts?.account_unread || []).find(([k]) => k === id)?.[1] ?? 0;
 }
 function accountFlagged(id) {
   return (state.counts?.account_flagged || []).find(([k]) => k === id)?.[1] ?? 0;
@@ -529,11 +524,13 @@ function buildMail(stage) {
           type: "button",
           id: "btn-select",
           text: "多选",
-          title: "多选邮件（全选/反选/批量操作）",
-          onclick: toggleSelectMode,
+          title: "全选当前列表（也可直接悬停邮件行，点行首的勾选框）",
+          onclick: selectAll,
         }),
+        // 多选操作区：display:contents，子项直接成为头部 flex 项——
+        // 进入多选时头部「变成」操作条，而不是多出一条工具栏（无割裂感）
+        node("div", { class: "select-bar", id: "select-bar" }),
       ),
-      node("div", { class: "select-bar", id: "select-bar", hidden: true }),
       node("div", { class: "message-list", id: "messages", role: "list" }),
       node("div", { class: "pane-split", "data-split": "list", title: "拖动调整列表宽度" },
         node("span", { class: "split-grip", "aria-hidden": "true" }),
@@ -1558,67 +1555,117 @@ async function loadList(folder) {
  */
 // ================================================================ 多选 / 右键菜单
 
-/** 多选模式开关。退出时清空选择。 */
-function toggleSelectMode() {
-  state.selectMode = !state.selectMode;
-  if (!state.selectMode) state.selected.clear();
+/** 清空勾选但留在多选模式（「取消全选」按钮用）。 */
+function clearPicks() {
+  state.selected.clear();
+  state.selectAnchor = null;
   repaintList();
   renderSelectBar();
 }
 
-/** 选中操作条（列表头上方）：全选/反选 + 批量动作 + 取消。 */
+/** 退出多选模式（✕ / Esc / 换视图共用）：模式关 + 勾选清。 */
+function clearSelection() {
+  state.selectMode = false;
+  clearPicks();
+}
+
+/** 选中操作条：不进多选时为空（display:contents 不占任何空间）；
+ *  进多选时头部常规控件（筛选/标题/计数/全标已读/多选）整体让位，
+ *  同一行 44px 的头部**就是**操作条——视觉上没有「多出来的一条栏」。 */
 function renderSelectBar() {
   const bar = document.getElementById("select-bar");
   if (!bar) return;
   clear(bar);
-  const btn = document.getElementById("btn-select");
-  if (btn) btn.textContent = state.selectMode ? "退出多选" : "多选";
+  const threads = groupIntoThreads(state.messages);
+  const n = state.selected.size;
+
+  // 头部常规控件：多选中让位，退出后恢复
+  const standard = ["btn-filter", "list-title", "list-count", "btn-read-all", "btn-select"]
+    .map((id) => document.getElementById(id));
   if (!state.selectMode) {
-    bar.hidden = true;
+    for (const el of standard) if (el) el.hidden = false;
     return;
   }
-  bar.hidden = false;
-  const n = state.selected.size;
+  for (const el of standard) if (el) el.hidden = true;
+
+  // 智能切换：全部已读 → 提供「标为未读」，反之「标为已读」；星标同理。
+  const picked = threads.filter((t) => state.selected.has(t.key));
+  const allSeen = picked.length > 0 && picked.every((t) => t.messages.every((m) => m.flags.seen));
+  const allFlagged = picked.length > 0 && picked.every((t) => t.messages.every((m) => m.flags.flagged));
+  // 废纸篓视图里「删除」= 永久删除（一样要两步确认）
+  const inTrash = state.folders.find((f) => f.id === state.folderId)?.kind === "trash";
+  const noAct = n === 0 ? { disabled: true } : {};
+  // 标题折进计数里：多选中也能知道自己在哪个文件夹
+  const where = document.getElementById("list-title")?.textContent || "";
+
   // 注意：node() 不跳过 false —— disabled: false 会被 setAttribute 变成真禁用
-  const act = (text, fn, danger) =>
-    node("button", {
-      class: danger ? "btn btn-danger" : "btn",
-      type: "button",
-      text,
-      ...(n === 0 ? { disabled: true } : {}),
-      onclick: fn,
-    });
   bar.append(
-    node("span", { class: "sel-count", text: n > 0 ? `已选 ${n} 项` : "点选邮件" }),
-    node("button", { class: "btn", type: "button", text: "全选", onclick: selectAll }),
-    node("button", { class: "btn", type: "button", text: "反选", onclick: invertSelect }),
-    node("span", { class: "sel-sep" }),
-    act("标为已读", () => batchMark(true)),
-    act("标星", () => batchStar(true)),
-    act("删除", batchDelete, true),
-    act("移动 ▾", batchMoveMenu),
+    node("span", { class: "sel-count", text: n > 0 ? `已选 ${n}` : "点选邮件" }),
+    where ? node("span", { class: "sel-where", text: where }) : null,
+    node("button", {
+      class: "btn act-primary", type: "button",
+      text: allSeen ? "标为未读" : "标为已读",
+      ...noAct,
+      onclick: () => batchMark(!allSeen),
+    }),
+    node("button", {
+      class: "btn", type: "button",
+      text: allFlagged ? "取消星标" : "标星",
+      ...noAct,
+      onclick: () => batchStar(!allFlagged),
+    }),
+    node("button", { class: "btn", type: "button", text: "移动 ▾", ...noAct, onclick: batchMoveMenu }),
+    node("button", {
+      class: "btn btn-danger", type: "button",
+      text: inTrash ? "永久删除" : "删除",
+      ...noAct,
+      onclick: (e) => armBatchDelete(e.currentTarget, inTrash),
+    }),
+    node("span", { class: "sel-flex" }),
+    node("button", {
+      class: "btn sel-all", type: "button",
+      // 全选 ↔ 取消全选 同一个按钮：取消全选**不退出模式**，只是清空勾选
+      text: n === threads.length && n > 0 ? "取消全选" : "全选",
+      title: "全选当前列表（Ctrl+A）",
+      onclick: () => {
+        if (n === threads.length && n > 0) clearPicks();
+        else selectAll();
+      },
+    }),
+    node("button", {
+      class: "btn sel-exit", type: "button", text: "✕", title: "退出多选（Esc）",
+      "aria-label": "退出多选", onclick: clearSelection,
+    }),
   );
 }
 
-function togglePick(t) {
-  if (state.selected.has(t.key)) state.selected.delete(t.key);
-  else state.selected.add(t.key);
+function togglePick(t, ev) {
+  const threads = groupIntoThreads(state.messages);
+  state.selectMode = true;
+  if (ev?.shiftKey && state.selectAnchor != null) {
+    // Shift 连选：锚点 → 当前行之间的会话全收（Gmail 同款）
+    const ai = threads.findIndex((x) => x.key === state.selectAnchor);
+    const bi = threads.findIndex((x) => x.key === t.key);
+    if (ai >= 0 && bi >= 0) {
+      const [lo, hi] = ai < bi ? [ai, bi] : [bi, ai];
+      for (let i = lo; i <= hi; i++) state.selected.add(threads[i].key);
+    } else {
+      state.selected.add(t.key);
+    }
+  } else if (state.selected.has(t.key)) {
+    state.selected.delete(t.key);
+  } else {
+    state.selected.add(t.key);
+  }
+  state.selectAnchor = t.key;
   repaintList();
   renderSelectBar();
 }
 
 function selectAll() {
+  state.selectMode = true;
   for (const t of groupIntoThreads(state.messages)) state.selected.add(t.key);
-  repaintList();
-  renderSelectBar();
-}
-
-function invertSelect() {
-  const cur = new Set(state.selected);
-  state.selected.clear();
-  for (const t of groupIntoThreads(state.messages)) {
-    if (!cur.has(t.key)) state.selected.add(t.key);
-  }
+  state.selectAnchor = null;
   repaintList();
   renderSelectBar();
 }
@@ -1631,7 +1678,9 @@ function selectedMessageIds() {
     .flatMap((t) => t.messages.map((x) => x.id));
 }
 
-/** 批量改标志：本地 立刻刷，服务器由后端按箱批量 UID STORE。 */
+/** 批量改标志：本地立刻刷，服务器由后端按箱批量 UID STORE。
+ *  完成后**保留选择**——标已读/标星是「还想继续挑下一批」的操作，
+ *  清空会把人的操作流打断（删除/移动才清空并退出）。 */
 async function batchSetFlags(seen, flagged) {
   const ids = selectedMessageIds();
   if (ids.length === 0) return;
@@ -1643,8 +1692,7 @@ async function batchSetFlags(seen, flagged) {
         if (flagged != null) m.flags.flagged = flagged;
       }
     }
-    toast(seen != null ? `已标为${seen ? "已读" : "未读"} ${ids.length} 封` : `已标星 ${ids.length} 封`);
-    state.selected.clear();
+    toast(seen != null ? `已标为${seen ? "已读" : "未读"} ${ids.length} 封` : `已${flagged ? "标星" : "取消星标"} ${ids.length} 封`);
     repaintList();
     updateListCount();
     renderSelectBar();
@@ -1658,19 +1706,44 @@ async function batchSetFlags(seen, flagged) {
 const batchMark = (seen) => batchSetFlags(seen, null);
 const batchStar = (flagged) => batchSetFlags(null, flagged);
 
-/** 批量删除（去废纸篓；POP3 账号删本地行）。 */
-async function batchDelete() {
+/** 批量删除的两步确认状态（与账号删除同款「再点一次」）。 */
+let batchDelArmed = false;
+let batchDelTimer = 0;
+
+/** 批量删除（去废纸篓；废纸篓里 = 永久删除；POP3 账号删本地行）。
+ *  第一步只把按钮换成「再点一次确认删除」，3 秒内第二下才真删——
+ *  批量误删的代价比单封高得多，不该一碰就走。 */
+function armBatchDelete(btn, permanent) {
+  if (!batchDelArmed) {
+    batchDelArmed = true;
+    btn.dataset.armed = "1";
+    btn.textContent = "再点一次确认删除";
+    clearTimeout(batchDelTimer);
+    batchDelTimer = setTimeout(() => {
+      batchDelArmed = false;
+      if (btn.isConnected && btn.dataset.armed === "1") {
+        btn.dataset.armed = "";
+        btn.textContent = permanent ? "永久删除" : "删除";
+      }
+    }, 3000);
+    return;
+  }
+  clearTimeout(batchDelTimer);
+  batchDelArmed = false;
+  batchDelete(permanent);
+}
+
+async function batchDelete(permanent = false) {
   const ids = selectedMessageIds();
   if (ids.length === 0) return;
   try {
-    await invoke("batch_delete", { message_ids: ids, permanent: false });
+    await invoke("batch_delete", { message_ids: ids, permanent });
     state.messages = state.messages.filter((m) => !ids.includes(m.id));
-    toast(`已删除 ${ids.length} 封`);
-    state.selected.clear();
-    repaintList();
+    toast(permanent ? `已永久删除 ${ids.length} 封` : `已删除 ${ids.length} 封`);
+    clearSelection();
     updateListCount();
-    renderSelectBar();
     renderReader();
+    await refreshCounts();
   } catch (err) {
     toast(`删除失败：${err instanceof Error ? err.message : err}`);
   }
@@ -1686,11 +1759,10 @@ function batchMoveMenu(e) {
       await invoke("batch_move", { message_ids: ids, to_folder_id: toId });
       state.messages = state.messages.filter((m) => !ids.includes(m.id));
       toast(`已挪动 ${ids.length} 封`);
-      state.selected.clear();
-      repaintList();
+      clearSelection();
       updateListCount();
-      renderSelectBar();
       renderReader();
+      await refreshCounts();
     } catch (err) {
       toast(`挪箱失败：${err instanceof Error ? err.message : err}`);
     }
@@ -2135,28 +2207,43 @@ function renderThreadRow(t) {
   const sel =
     (state.thread && state.thread.key != null && t.key != null && state.thread.key === t.key) ||
     (state.messageId != null && t.messages.some((x) => x.id === state.messageId));
-  const picked = state.selectMode && state.selected.has(t.key);
+  const picked = state.selected.has(t.key);
+  // 多选模式：所有行都亮勾选框；没有勾选时 hover 行首浮现一个
+  const selecting = state.selectMode;
   return node(
     "button",
     {
-      class: `row${unread ? " is-unread" : ""}${sel ? " is-sel" : ""}${picked ? " is-picked" : ""}`,
+      class: `row${unread ? " is-unread" : ""}${sel ? " is-sel" : ""}${picked ? " is-picked" : ""}${!selecting ? " has-hoverpick" : ""}`,
       type: "button",
       role: "listitem",
       "aria-current": sel ? "true" : "false",
-      onclick: () => {
-        // 多选模式：点行 = 勾选/取消，不打开
-        if (state.selectMode) {
-          togglePick(t);
+      onclick: (e) => {
+        // 多选中：点行 = 勾选/取消（Shift 连选），不打开
+        if (selecting) {
+          togglePick(t, e);
           return;
         }
         openMessage(m.id);
       },
       oncontextmenu: (e) => openMessageCtxMenu(e, t),
     },
-    state.selectMode
+    // 多选中：行首常驻勾选框
+    selecting
       ? node("span", { class: `row-pick${picked ? " is-on" : ""}`, "aria-hidden": "true", text: picked ? "✓" : "" })
       : null,
     renderAvatar(m.from?.[0] ?? {}),
+    // 非多选时 hover 浮现的勾选框（盖在头像上，点一下即进入多选）
+    !selecting
+      ? node("span", {
+          class: "row-pick-hover", role: "button", tabindex: "-1",
+          title: "选择此会话（进入多选）", "aria-label": "选择此会话",
+          onclick: (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            togglePick(t);
+          },
+        })
+      : null,
     node(
       "div",
       { class: "row-main" },
@@ -2184,20 +2271,23 @@ function renderThreadRow(t) {
       ),
     ),
     // 快速已读/未读：不打开邮件就改标志（会话整会话一起），并推回服务器。
-    node("span", {
-      class: `row-quick${unread ? "" : " is-seen"}`,
-      role: "button",
-      tabindex: "0",
-      title: unread ? "标为已读（同步到服务器）" : "标为未读（同步到服务器）",
-      "aria-label": unread ? "标为已读" : "标为未读",
-      text: unread ? "✓" : "○",
-      onclick: (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        // 有未读 → 全标已读；全已读 → 全标未读（会话整会话一起）
-        quickMarkRead(t, unread);
-      },
-    }),
+    // 多选进行中不画——那时点行是勾选，✓/○ 留在原地容易误触。
+    !selecting
+      ? node("span", {
+          class: `row-quick${unread ? "" : " is-seen"}`,
+          role: "button",
+          tabindex: "0",
+          title: unread ? "标为已读（同步到服务器）" : "标为未读（同步到服务器）",
+          "aria-label": unread ? "标为已读" : "标为未读",
+          text: unread ? "✓" : "○",
+          onclick: (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            // 有未读 → 全标已读；全已读 → 全标未读（会话整会话一起）
+            quickMarkRead(t, unread);
+          },
+        })
+      : null,
   );
 }
 
@@ -2260,8 +2350,8 @@ function repaintList() {
 
 /** 换视图/换文件夹时退出多选（选择不该跨视图残留）。 */
 function resetSelect() {
-  state.selectMode = false;
   state.selected.clear();
+  state.selectAnchor = null;
 }
 
 // ================================================================= 右栏
@@ -3119,21 +3209,13 @@ async function syncNow() {
  *
  * **不碰正在读的那封信** —— 同步是后台动作，不该把人的阅读位置踢掉。
  * 只有还没有选中文件夹时才挑一个（一般是收件箱）。
+ *
+ * 事件由 worker 在**同步提交之后**才发，所以这里重拉的 smart_counts
+ * 必然已含新数据，不需要任何「事件值盖重拉值」的补丁。
  */
 async function reloadAfterSync() {
   if (!state.account) return;
   await refreshSidebarData();
-  // 事件给的上界盖到重拉的旧值上（新信入库后这次同步可能还没数到）——
-  // **必须在 renderSidebar 之前**，否则渲染的还是被覆盖的旧值。
-  if (state.counts && unreadHint.size > 0) {
-    for (const [aid, n] of unreadHint) {
-      state.counts.all_unread = Math.max(state.counts.all_unread ?? 0, n);
-      const list = state.counts.account_unread ?? (state.counts.account_unread = []);
-      const u = list.find((x) => x[0] === aid);
-      if (u) u[1] = Math.max(u[1] ?? 0, n);
-      else list.push([aid, n]);
-    }
-  }
   const folders = withDraftsFolder(
     state.allFolders.filter((f) => f.account_id === state.account.id && f.id !== 0),
   );
@@ -3175,12 +3257,12 @@ async function reloadAfterSync() {
 
 // 后台同步线程（`src-tauri/src/worker.rs`）收完信会发这个事件。
 // 监听器只负责「刷新界面」，不负责同步本身。
+// ⚠️ 依赖 `src-tauri/capabilities/default.json` 授予的 core:event 权限：
+// Tauri v2 里插件命令（listen/emit）无 capability 会被 ACL 静默拒绝，
+// 表现为「invoke 都正常、事件永远不到」——历史上因此踩过大坑。
 const listen = globalThis.__TAURI__?.event?.listen;
 if (typeof listen === "function") {
-  listen("sync://changed", (e) => {
-    // 探针：收到 sync 事件就弹 toast（前台验证用，定完删除）
-    toast(`sync 事件: fetched=${(e && e.payload && e.payload.fetched) ?? "?"} unread=${(e && e.payload && e.payload.account_unread) ?? "无"}`);
-    console.log("[mailway] sync event", JSON.stringify((e && e.payload) || {}));
+  const syncHandler = (e) => {
     const p = (e && e.payload) || {};
     const status = document.getElementById("sync-status");
     if (status) {
@@ -3196,14 +3278,26 @@ if (typeof listen === "function") {
     if (p.fetched > 0) {
       toast(`收到 ${p.fetched} 封新邮件`);
     }
-    // 后端随事件带的**当前未读**是权威上界，存 hint；真正的写入在
-    // reloadAfterSync 重拉**之后**做（那里才渲染，写入不会被覆盖）。
-    if (p.account_unread != null && p.account_unread > 0) {
-      unreadHint.set(p.account_id, Math.max(unreadHint.get(p.account_id) ?? 0, p.account_unread));
+    // 事件由 worker 在同步提交后发出，带的角标就是库里最新值：整体覆盖
+    // counts（含逐箱未读——只改 account_unread 的话，INBOX 那行的角标
+    // 不会动），用户看到的角标立刻跟上，不用等 reload 重拉。
+    if (p.account_unread != null && state.counts) {
+      if (p.all_unread != null) state.counts.all_unread = p.all_unread;
+      if (p.inbox_unread != null) state.counts.inbox_unread = p.inbox_unread;
+      if (Array.isArray(p.folder_unread)) {
+        const map = new Map(state.counts.folder_unread || []);
+        for (const [fid, n] of p.folder_unread) map.set(fid, n);
+        state.counts.folder_unread = [...map];
+      }
+      const list = state.counts.account_unread ?? (state.counts.account_unread = []);
+      const u = list.find((x) => x[0] === p.account_id);
+      if (u) u[1] = p.account_unread;
+      else list.push([p.account_id, p.account_unread]);
       renderSidebar();
     }
     reloadAfterSync().catch((err) => console.error("刷新失败", err));
-  });
+  };
+  listen("sync://changed", syncHandler);
 }
 
 // ================================================================= 通讯录（M4）
@@ -4474,6 +4568,24 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "F5") {
     e.preventDefault();
     if (!e.repeat) syncNow();
+    return;
+  }
+
+  // Esc = 退出多选（多选模式里）。焦点在按钮/输入框上也该管用，
+  // 所以放在「焦点白名单」之前。
+  if (e.key === "Escape" && state.selectMode) {
+    clearSelection();
+    return;
+  }
+
+  // Ctrl+A = 全选当前列表。焦点在输入框/编辑区时不抢——那里是全选文字。
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "a" || e.key === "A")) {
+    const ae = document.activeElement;
+    const typing = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable);
+    if (!typing) {
+      e.preventDefault();
+      selectAll();
+    }
     return;
   }
 

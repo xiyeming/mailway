@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口默认权限。注意：Tauri v2 里插件命令（core:event 的 listen/emit 等）无论有没有 app ACL 都会走 ACL 检查——没有这份 capability 时 listen 会被静默拒绝，后台同步事件永远到不了前端（自定义 invoke 命令反而不检查，所以应用看着一切正常）。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
