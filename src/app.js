@@ -2231,9 +2231,17 @@ function groupIntoThreads(list) {
     return list.map((m) => ({ key: m.thread_key || String(m.id), count: 1, latest: m, messages: [m] }));
   }
   const map = new Map();
+  const seenMid = new Map(); // thread key -> Set<Message-ID>：跨文件夹同信去重
   for (const m of list) {
     const key = m.thread_key || m.subject || String(m.id);
-    if (!map.has(key)) map.set(key, []);
+    if (!map.has(key)) {
+      map.set(key, []);
+      seenMid.set(key, new Set());
+    }
+    // Gmail 同封信在 INBOX/所有邮件/重要 各有行；列表聚合按 Message-ID 去重
+    const mids = seenMid.get(key);
+    if (m.message_id && mids.has(m.message_id)) continue;
+    if (m.message_id) mids.add(m.message_id);
     map.get(key).push(m);
   }
   const threads = [...map.entries()].map(([key, msgs]) => {
@@ -2413,6 +2421,24 @@ function resetSelect() {
 }
 
 // ================================================================= 右栏
+
+/** 收起当前展开的信：会话退回「全部折叠行」状态（工具条随之消失，
+ *  点任意行重新展开）。保持这封信的视口位置不动。 */
+function collapseThread() {
+  if (!state.thread || !state.detail) return;
+  const id = state.detail.summary.id;
+  const reader = document.getElementById("reader");
+  const el = reader?.querySelector(`[data-mid="${id}"]`);
+  const anchor = el ? readerContentTop(el) - reader.scrollTop : null;
+  state.detail = null;
+  state.messageId = null;
+  renderReader();
+  if (anchor != null) {
+    const r2 = document.getElementById("reader");
+    const el2 = r2?.querySelector(`[data-mid="${id}"]`);
+    if (el2) r2.scrollTop = readerContentTop(el2) - anchor;
+  }
+}
 
 /** 元素在阅读区内容坐标系里的顶部位置（含滚动，跨重画可比）。 */
 function readerContentTop(el) {
@@ -2672,6 +2698,13 @@ function renderMsgHead(d) {
     node(
       "div",
       { class: "msg-side" },
+      // 多封会话里，展开的信可以收回成一行（单封收起来没意义，不显示）
+      state.thread?.messages?.length > 1
+        ? node("button", {
+            class: "msg-details-btn", type: "button", text: "收起",
+            onclick: collapseThread,
+          })
+        : null,
       node("button", {
         class: "msg-details-btn",
         type: "button",

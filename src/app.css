@@ -1875,6 +1875,10 @@ button.thread-item:hover {
 /* 展开的那封：完整正文 */
 .thread-item.is-open {
   padding: 0.35rem 0.85rem 0.85rem;
+  /* D2 把展开卡做成「融进阅读区」（无边框透明底），聚合视图里反而分不清
+     哪封是展开的 —— 加回外边框和底色，从折叠行里站出来 */
+  border: 1px solid var(--line);
+  background: var(--bg);
 }
 
 /* 列表行的会话封数徽标（参考图 4 的「4」）。 */

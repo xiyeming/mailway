@@ -566,9 +566,16 @@ impl Store {
         )?;
         let rows = stmt.query_map(params![account_id], row_to_summary)?;
         let all = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        // Gmail 会把同一封信同时存进 INBOX / 所有邮件 / 重要 等多个文件夹，
+        // 每个文件夹一行 —— 按 RFC Message-ID 去重，同一封信只留一份
+        // （不然阅读区同一封展示 N 次）。message_id 为空的行无法识别，保留。
+        let mut seen = std::collections::HashSet::new();
         Ok(all
             .into_iter()
             .filter(|m: &MessageSummary| m.thread_key == thread_key)
+            .filter(|m: &MessageSummary| {
+                m.message_id.is_empty() || seen.insert(m.message_id.clone())
+            })
             .collect())
     }
 
@@ -1873,13 +1880,28 @@ fn row_to_summary(r: &Row) -> rusqlite::Result<MessageSummary> {
 /// 读一遍 `(account_id, subject)` 在内存里按主题归一分组计数 —— 邮件量不大时够用，
 /// 免得为了一个角标给 messages 表再加一列 + 迁移回填。
 fn attach_thread_counts(conn: &Connection, msgs: &mut [MessageSummary]) -> rusqlite::Result<()> {
+    // 封数按 (账号, 会话, Message-ID) 去重 —— Gmail 同封信在多个文件夹各有
+    // 一行，不去重徽标会虚高（真实 40 封显示 118）。message_id 为空的
+    // 行无法识别，按原样计数。
     let mut map: std::collections::HashMap<(i64, String), u32> = std::collections::HashMap::new();
+    let mut seen: std::collections::HashSet<(i64, String, String)> = std::collections::HashSet::new();
     {
-        let mut stmt = conn.prepare("SELECT account_id, subject FROM messages")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        let mut stmt = conn.prepare("SELECT account_id, subject, message_id FROM messages")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })?;
         for row in rows {
-            let (acc, subj) = row?;
+            let (acc, subj, mid) = row?;
             let key = (acc, crate::thread::normalized_subject(&subj));
+            if let Some(mid) = mid.filter(|m: &String| !m.is_empty()) {
+                if !seen.insert((acc, key.1.clone(), mid)) {
+                    continue; // 跨文件夹重复的那几份不算数
+                }
+            }
             *map.entry(key).or_insert(0) += 1;
         }
     }
