@@ -95,8 +95,14 @@ function quoteDate(iso) {
 }
 
 /**
- * 拼引用块。**只吃 `body_text`**（纯文本），逐行 `textContent` 落到 DOM ——
- * 外源 HTML 一个字节都不进编辑区（安全红线，见文件顶部）。
+ * 拼引用块。两种形态，优先级：
+ *
+ * 1. **样式版**（有 `body_html` 时）：原信净化后的 HTML 整块嵌入
+ *    `contenteditable=false` 的壳 —— 用户改不动、拆不开，只能整块「移除引用」。
+ *    效果对齐网易邮箱大师：【提示】彩条、表单颜色、排版全保留。
+ *    安全依据：`open_message` 的 `body_html` 已过后端 `core::sanitize`
+ *    （阅读页同款来源），这是文件头允许 innerHTML 的第三个地方。
+ * 2. **纯文本版**（只有 `body_text` 时）：逐行 textContent，老路。
  */
 function buildQuote(mode, source) {
   const s = source.summary;
@@ -109,22 +115,37 @@ function buildQuote(mode, source) {
     bq.append(d);
   };
 
-  if (mode === "forward") {
-    push("---------- 转发的邮件 ----------", "quote-head");
-    push(`发件人：${mailboxListText(s.from)}`);
-    push(`日  期：${quoteDate(s.date)}`);
-    push(`主  题：${s.subject || "（无主题）"}`);
-    push(`收件人：${mailboxListText(s.to)}`);
-    push("");
-  } else {
-    push(`在 ${quoteDate(s.date)}，${mailboxListText(s.from)} 写道：`, "quote-head");
+  // 引用头：回复/转发统一成网易邮箱大师式样的信息块——
+  // 灰色小字分隔线 + 发件人/发送时间/收件人/主题（原始主题，不带 Re:/Fwd:）。
+  push(mode === "forward" ? "---- 转发的邮件 ----" : "---- 回复的原邮件 ----", "quote-head");
+  // 信息块做成独立底色面板（网易的深色信息块），和正文、和写信区都分开。
+  const meta = document.createElement("div");
+  meta.className = "quote-meta";
+  for (const t of [
+    `发件人：${mailboxListText(s.from)}`,
+    `发送时间：${quoteDate(s.date)}`,
+    `收件人：${mailboxListText(s.to)}`,
+    `主题：${s.subject || "（无主题）"}`,
+  ]) {
+    const d = document.createElement("div");
+    d.className = "quote-meta-line";
+    d.textContent = t;
+    meta.append(d);
   }
+  bq.append(meta);
 
-  const text = source.body_text;
-  if (text && text.trim()) {
-    const prefix = mode === "forward" ? "" : "> ";
-    for (const ln of text.replace(/\r\n/g, "\n").split("\n")) {
-      push(ln ? prefix + ln : prefix.trimEnd());
+  if (source.body_html && source.body_kind !== "plain") {
+    // 样式版引用（净化过的原信 HTML，见函数头）
+    const rich = document.createElement("div");
+    rich.className = "quote-rich";
+    rich.setAttribute("contenteditable", "false");
+    rich.setAttribute("aria-label", "引用的原始邮件（不可编辑）");
+    rich.innerHTML = source.body_html;
+    bq.append(rich);
+  } else if (source.body_text && source.body_text.trim()) {
+    push("");
+    for (const ln of source.body_text.replace(/\r\n/g, "\n").split("\n")) {
+      push(ln);
     }
   } else if (source.body_html) {
     push("（这封邮件的正文是富文本，回复时未引用。）", "quote-note");
@@ -248,7 +269,10 @@ function buildCompose(initialAccount) {
     role: "textbox",
     "aria-multiline": "true",
     "aria-label": "正文",
-    oninput: markDirty,
+    oninput: () => {
+      syncDelQuoteBtn();
+      markDirty();
+    },
   });
 
   // ---- 附件 / 模板（按钮进工具条第一组，对齐网易的「添加附件 ▾ 插入 ▾」）--
@@ -429,6 +453,19 @@ function buildCompose(initialAccount) {
     node("header", { class: "compose-head" },
       sendBtn,
       node("div", { class: "more-wrap from-wrap" }, fromBtn, fromMenu),
+      // 引用出口：有的收件方（如某些代购/工单系统）要求「直接回复」——
+      // 正文只写指令、绝不带原始内容，否则自动判「订单内容重复」拒收。
+      // 一键移除引用块；只在编辑区有引用时出现。
+      node("button", {
+        class: "btn compose-delquote", type: "button", text: "移除引用",
+        hidden: true, title: "删除正文里的引用块（直接回复）",
+        onclick: () => {
+          editor.querySelectorAll(".quote").forEach((q) => q.remove());
+          syncDelQuoteBtn();
+          markDirty();
+          editor.focus();
+        },
+      }),
       status,
       sendBadge,
       node("span", { class: "compose-head-gap", "aria-hidden": "true" }),
@@ -476,6 +513,7 @@ function buildCompose(initialAccount) {
     bcc.set([]);
     subject.value = "";
     clear(editor);
+    syncDelQuoteBtn();
     renderAtts();
     if (account) sig.value = account.signature ?? "";
     renderSigCard();
@@ -522,7 +560,13 @@ function buildCompose(initialAccount) {
     }
 
     clear(editor);
-    editor.append(buildQuote(mode, source));
+    // 操作逻辑对齐网易邮箱大师：**上方留一空行给回复正文**，引用整块沉在
+    // 下面。之前编辑区只有引用块，用户点了没地方自然落笔，容易把话写进
+    // 引用里（收到的回复格式就是这么坏的）。
+    const lead = document.createElement("div");
+    lead.append(document.createElement("br"));
+    editor.append(lead, buildQuote(mode, source));
+    syncDelQuoteBtn();
     if (account) sig.value = account.signature ?? "";
     renderSigCard();
     renderAtts();
@@ -553,8 +597,9 @@ function buildCompose(initialAccount) {
         editor.textContent = d.text;
       }
       if (account) sig.value = account.signature ?? "";
-    renderSigCard();
+      renderSigCard();
       renderAtts();
+      syncDelQuoteBtn();
       state.dirty = false;
       setStatus(`草稿 ${fmtTime(d.updated_at)}`);
     } catch (err) {
@@ -577,6 +622,12 @@ function buildCompose(initialAccount) {
       state.saveTimer = null;
       flushSave();
     }, AUTOSAVE_MS);
+  }
+
+  // 「移除引用」按钮的显隐跟着编辑区里的引用块走（输入/预填/载草稿后同步）
+  const delQuoteBtn = root.querySelector(".compose-delquote");
+  function syncDelQuoteBtn() {
+    if (delQuoteBtn) delQuoteBtn.hidden = !editor.querySelector(".quote");
   }
 
   /** 马上存一次。关闭窗口、点「保存草稿」时也走这里。 */
@@ -657,11 +708,38 @@ function buildCompose(initialAccount) {
   // **和自动保存串在同一条链上**（`saving`），不另起一条：发送当中插进来的
   // 那次保存会在 `send_message` 删掉草稿之后把它「复活」，而复活的草稿是
   // 一封已经发出去的信 —— 用户会以为它没发，再点一次。
+  // 正文去掉引用块后一个字都没有 = 空回复。实测后果：代购站收到「只有引用、
+  // 没有正文」的回复会直接自动退回「回信格式方法错误」。八成是误发 ——
+  // 第一下只提醒（再点一次才真发），别让用户空手发出去。
+  let emptyArmed = false;
+  let emptyArmTimer = 0;
+  function bodyWithoutQuote() {
+    const clone = editor.cloneNode(true);
+    clone.querySelectorAll(".quote").forEach((el) => el.remove());
+    return clone.textContent.trim();
+  }
+
   function send() {
     if (state.removed) return;
     if ([...to.get(), ...cc.get(), ...bcc.get()].length === 0) {
       setSendStatus("还没有收件人", "err");
       return;
+    }
+    if (editor.querySelector(".quote") && !bodyWithoutQuote()) {
+      if (!emptyArmed) {
+        emptyArmed = true;
+        sendBtn.textContent = "正文为空，再点一次仍发送";
+        setSendStatus("正文只有引用、没写内容——对方可能拒收", "err");
+        clearTimeout(emptyArmTimer);
+        emptyArmTimer = setTimeout(() => {
+          emptyArmed = false;
+          sendBtn.textContent = "发送";
+        }, 5000);
+        return;
+      }
+      clearTimeout(emptyArmTimer);
+      emptyArmed = false;
+      sendBtn.textContent = "发送";
     }
     saving = saving.then(doSend);
     return saving;

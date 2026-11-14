@@ -886,13 +886,26 @@ pub fn delete_message(
     message_id: i64,
     permanent: bool,
 ) -> Result<(), String> {
-    let stored = state
-        .store
-        .get_message_raw(message_id)
-        .map_err(e)?
-        .ok_or_else(|| not_found("这封邮件"))?;
-    let folder_id = stored.summary.folder_id;
-    let uid = stored.summary.uid;
+    // 跨文件夹副本一并处理（同账号同 Message-ID 的行）：本地全删，
+    // 服务器端每份副本各挪一趟 —— 只动一份的话，别的文件夹里的副本
+    // 下轮同步会把这封信「复活」。
+    let all_ids = state.store.expand_to_copies(&[message_id]).map_err(e)?;
+    // (folder_id, uid) 清单（POP3 用不到，但先收集无妨）
+    let mut copies: Vec<(i64, u32)> = Vec::new();
+    let mut account_id = None;
+    for cid in &all_ids {
+        if let Ok(Some(st)) = state.store.get_message_raw(*cid) {
+            copies.push((st.summary.folder_id, st.summary.uid));
+            account_id = Some(st.summary.account_id);
+        }
+        state.store.delete_message(*cid).map_err(e)?;
+    }
+    let Some(account_id) = account_id else {
+        return Ok(());
+    };
+    let first = copies.first().copied().unwrap_or((0, 0));
+    let folder_id = first.0;
+    let uid = first.1;
     let folder = state
         .store
         .get_folder(folder_id)
@@ -902,7 +915,7 @@ pub fn delete_message(
     // POP3：删信就是删本地行 —— 服务器上「只拉不删」，DELE 一律不用
     if let Ok(Some(account)) = state.store.get_account(folder.account_id) {
         if account.protocol == Protocol::Pop3 {
-            return state.store.delete_message(message_id).map_err(e);
+            return Ok(());
         }
     }
 
@@ -911,36 +924,38 @@ pub fn delete_message(
     } else {
         state
             .store
-            .list_folders(folder.account_id)
+            .list_folders(account_id)
             .map_err(e)?
             .into_iter()
-            .find(|f| f.kind == FolderKind::Trash && f.id != folder_id)
+            .find(|f| f.kind == FolderKind::Trash)
             .map(|f| f.id)
     };
 
     let store = Arc::clone(&state.store);
     let pool = Arc::clone(&state.pool);
-    let spawned = match trash_id {
-        Some(trash_id) => std::thread::Builder::new()
-            .name(format!("mailway-move-{message_id}"))
-            .spawn(move || {
-                if let Err(err) = move_message_remote(&store, &pool, folder_id, trash_id, uid) {
-                    tracing::warn!(message_id, folder_id, uid, "挪废纸篓失败: {}", err.user_message());
+    let spawned = std::thread::Builder::new()
+        .name(format!("mailway-del-{message_id}"))
+        .spawn(move || {
+            for (fid, uid) in copies {
+                let res: CoreResult<()> = (|| {
+                    if let Some(trash_id) = trash_id {
+                        if fid != trash_id {
+                            move_message_remote(&store, &pool, fid, trash_id, uid)?;
+                        }
+                    } else {
+                        delete_message_remote(&store, &pool, fid, uid)?;
+                    }
+                    Ok(())
+                })();
+                if let Err(err) = res {
+                    tracing::warn!(folder_id = fid, uid, "删除副本推服务器失败: {}", err.user_message());
                 }
-            }),
-        None => std::thread::Builder::new()
-            .name(format!("mailway-del-{message_id}"))
-            .spawn(move || {
-                if let Err(err) = delete_message_remote(&store, &pool, folder_id, uid) {
-                    tracing::warn!(message_id, folder_id, uid, "彻底删除推服务器失败: {}", err.user_message());
-                }
-            }),
-    };
+            }
+        });
     if let Err(err) = spawned {
         tracing::warn!("起删信线程失败: {err}");
     }
-
-    state.store.delete_message(message_id).map_err(e)
+    Ok(())
 }
 
 /// 「整理」= 把这封信挪到另一个文件夹。服务器端 `UID MOVE`（后台线程），
@@ -1635,6 +1650,9 @@ pub fn batch_delete(
     if message_ids.is_empty() {
         return Ok(0);
     }
+    // Gmail 同一封信在多个文件夹各有一行：删就得删全副本，
+    // 否则聚合列表里剩下的副本立刻「复活」这封邮件。
+    let message_ids = state.store.expand_to_copies(&message_ids).map_err(e)?;
     // 收集 (folder_id, uid) 并删本地行
     let mut by_folder: std::collections::HashMap<i64, Vec<u32>> = std::collections::HashMap::new();
     let mut accounts: std::collections::HashMap<i64, i64> = std::collections::HashMap::new(); // folder → account

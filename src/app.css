@@ -1874,6 +1874,8 @@ button.thread-item:hover {
 
 /* 展开的那封：完整正文 */
 .thread-item.is-open {
+  /* 横向留白：内容不能贴着边框（走查：太靠近边框）。主题按同等量级
+     缩进（.mail-subject），与卡内正文左对齐。 */
   padding: 0.35rem 0.85rem 0.85rem;
   /* D2 把展开卡做成「融进阅读区」（无边框透明底），聚合视图里反而分不清
      哪封是展开的 —— 加回外边框和底色，从折叠行里站出来 */
@@ -1998,7 +2000,7 @@ button.thread-item:hover {
 }
 
 .mail-subject {
-  margin: 0 0 0.75rem;
+  margin: 0 0.85rem 0.75rem; /* 与展开卡内正文左对齐（卡：border+0.85rem padding） */
   font-size: 1.35rem;
   line-height: 1.35;
   font-weight: 650;
@@ -2625,11 +2627,47 @@ button:focus-visible,
   color: var(--fg-muted);
 }
 
-/* 回复/转发引用块（compose.js `buildQuote`，纯文本拼出来的）。 */
-.compose-editor .quote .quote-head {
+/* 回复/转发引用块（compose.js `buildQuote`，纯文本拼出来的）。
+   正文保持正常字色 —— 网易的引用正文也是全文色，不淡。 */
+.compose-editor .quote {
   color: var(--fg);
-  font-weight: 600;
-  margin-bottom: 0.15rem;
+}
+
+.compose-editor .quote .quote-head {
+  /* 分隔线：网易式样的灰色小字，不当标题用 */
+  color: var(--fg-faint);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  margin: 0.45rem 0;
+}
+
+/* 原始邮件信息块：独立底色面板（发件人/发送时间/收件人/主题四行） */
+.compose-editor .quote .quote-meta {
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 0.45rem 0.75rem;
+  margin: 0.15rem 0 0.55rem;
+}
+
+.compose-editor .quote .quote-meta-line {
+  color: var(--fg-muted);
+  font-size: var(--fs-md);
+  line-height: 1.6;
+}
+
+/* 样式版引用：净化过的原信 HTML（contenteditable=false 壳）。
+   底色面板和写信区拉开层次，和网易邮箱大师的引用观感一致。 */
+.compose-editor .quote .quote-rich {
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.6rem 0.85rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow-x: auto;
+  /* 壳内文本可选中复制，但整壳不可编辑 */
+  user-select: text;
+  cursor: default;
 }
 
 .compose-editor .quote .quote-note {
@@ -4373,11 +4411,26 @@ textarea.folder-input:focus-visible {
   font-size: var(--fs-lg);
 }
 
-.compose-close,
-.compose-del {
+.compose-del,
+.compose-close {
   height: var(--ctl-h);
   min-width: var(--ctl-h);
   padding: 0 var(--sp-2);
+}
+
+/* 「移除引用」：只在有引用时出现，弱化成文字按钮 */
+.compose-delquote {
+  height: var(--ctl-h);
+  padding: 0 var(--sp-2);
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
+
+.compose-delquote:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 .compose-close {
@@ -5171,7 +5224,9 @@ input[type="search"]:focus-visible {
   z-index: 40;
   background: var(--bg);
   margin: 0 0 0.25rem;
-  padding: 0.55rem 0 0.45rem;
+  /* .reader 的 padding-top 被上面归零了，顶距全由这里给：
+     太少按钮贴着滚动口顶边、视觉上像被窗口「吞」了上半截 */
+  padding: 0.95rem 0 0.45rem;
 }
 
 

@@ -507,6 +507,30 @@ impl Conn {
         }
     }
 
+    /// 服务器支持 RFC 6851 `UID MOVE` 吗（163/Coremail 这类不支持，
+    /// 只能走 COPY + \Deleted + EXPUNGE 退化）。
+    pub fn supports_move(&mut self) -> bool {
+        let caps = match &mut self.session {
+            AnySession::Plain(s) => s.capabilities(),
+            AnySession::Tls(s) => s.capabilities(),
+        };
+        match caps {
+            Ok(caps) => caps.has_str("MOVE"),
+            Err(_) => false,
+        }
+    }
+
+    /// 把**当前选中信箱**里的信复制到另一个信箱（`UID COPY`，RFC 4315）。
+    /// 是 [`Self::uid_move`] 在不支持 MOVE 的服务器上的退化第一步。
+    pub fn uid_copy(&mut self, uid_set: &str, target: &str) -> Result<()> {
+        let cmd = format!("UID COPY {uid_set} \"{target}\"");
+        match &mut self.session {
+            AnySession::Plain(s) => s.run_command_and_check_ok(cmd),
+            AnySession::Tls(s) => s.run_command_and_check_ok(cmd),
+        }
+        .map_err(|e| Error::Imap(e.to_string()))
+    }
+
     /// NOOP 一次。`imap` crate 会丢掉 untagged 响应，所以这个只是保活/探活。
     pub fn noop(&mut self) -> Result<()> {
         match &mut self.session {

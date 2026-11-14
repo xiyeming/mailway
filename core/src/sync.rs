@@ -480,7 +480,20 @@ impl<'s> SyncEngine<'s> {
         }
         conn.select(&from.imap_name)?;
         let set = uids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-        conn.uid_move(&set, &to.imap_name)
+        Self::move_uids(conn, &set, to)
+    }
+
+    /// 挪一组 uid 到目标箱：`UID MOVE`（RFC 6851）优先；163/Coremail 这类
+    /// 不支持 MOVE 的服务器退化为 `COPY + \Deleted + EXPUNGE` 三连。
+    /// 退化没有原子性，但服务器上原件不处理的话，下轮同步会把
+    /// 「已删除/已挪动」的信原样拉回来。
+    fn move_uids(conn: &mut Conn, uid_set: &str, to: &Folder) -> Result<()> {
+        if conn.supports_move() {
+            return conn.uid_move(uid_set, &to.imap_name);
+        }
+        conn.uid_copy(uid_set, &to.imap_name)?;
+        conn.uid_store_flags(uid_set, &["\\Deleted"], &[])?;
+        conn.uid_expunge(uid_set)
     }
 
     /// 批量彻底删除：一条 `UID STORE \Deleted` + 一次 EXPUNGE。
@@ -510,7 +523,7 @@ impl<'s> SyncEngine<'s> {
         to: &Folder,
     ) -> Result<()> {
         conn.select(&from.imap_name)?;
-        conn.uid_move(&uid.to_string(), &to.imap_name)
+        Self::move_uids(conn, &uid.to_string(), to)
     }
 
     /// 彻底删除：打 `\Deleted` 再 EXPUNGE（见 [`Conn::uid_expunge`] 的
@@ -630,7 +643,7 @@ impl<'s> SyncEngine<'s> {
                         tracing::warn!(uid = f.uid, "规则改的标志推不回服务器（信照挪）: {e}");
                     }
                 }
-                match conn.uid_move(&f.uid.to_string(), &t.imap_name) {
+                match Self::move_uids(conn, &f.uid.to_string(), &t) {
                     Ok(()) => {
                         tracing::info!(uid = f.uid, to = %t.display_name, "来信分类：挪箱");
                         if !applied.labels.is_empty() {

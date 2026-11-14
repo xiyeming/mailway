@@ -1783,7 +1783,7 @@ async function batchDelete(permanent = false) {
   if (ids.length === 0) return;
   try {
     await invoke("batch_delete", { message_ids: ids, permanent });
-    state.messages = state.messages.filter((m) => !ids.includes(m.id));
+    removeFromList(ids);
     toast(permanent ? `已永久删除 ${ids.length} 封` : `已删除 ${ids.length} 封`);
     clearSelection();
     updateListCount();
@@ -1802,7 +1802,7 @@ function batchMoveMenu(e) {
   openMoveMenu(e, async (toId) => {
     try {
       await invoke("batch_move", { message_ids: ids, to_folder_id: toId });
-      state.messages = state.messages.filter((m) => !ids.includes(m.id));
+      removeFromList(ids, { purgeThread: false }); // 信还在（换了文件夹），会话堆叠保留
       toast(`已挪动 ${ids.length} 封`);
       clearSelection();
       updateListCount();
@@ -1993,12 +1993,34 @@ async function composeFromMessage(messageId, mode) {
   }
 }
 
+/** 删除/移动后从列表剔除：按 id + RFC Message-ID 双保险 —— Gmail 同封信
+ *  在多个文件夹各有一份行，只按 id 过滤剩下的副本会立刻「复活」该行。
+ *  @param opts.purgeThread 默认 true：把被删成员从阅读区会话堆里摘掉
+ *   （否则 renderReader 用缓存的 state.thread 重画，被删的还躺在里面，
+ *   点它就「找不到这封邮件」）。移动不摘 —— 信还在，只是换了文件夹。 */
+function removeFromList(ids, opts = {}) {
+  const mids = new Set(
+    state.messages.filter((m) => ids.includes(m.id) && m.message_id).map((m) => m.message_id),
+  );
+  state.messages = state.messages.filter((m) => !ids.includes(m.id) && !mids.has(m.message_id));
+  if (opts.purgeThread !== false && state.thread?.messages) {
+    state.thread.messages = state.thread.messages.filter(
+      (m) => !ids.includes(m.id) && !mids.has(m.message_id),
+    );
+  }
+  // 正在展开/选中的那封被删或挪走了：收起阅读区，别留着残影
+  if (state.detail && (ids.includes(state.detail.summary.id) || mids.has(state.detail.summary.message_id))) {
+    state.detail = null;
+    state.messageId = null;
+  }
+}
+
 /** 批量删除（右键菜单用；本地删行 + 后端批量推）。 */
 async function batchDeleteIds(ids) {
   if (ids.length === 0) return;
   try {
     await invoke("batch_delete", { message_ids: ids, permanent: false });
-    state.messages = state.messages.filter((m) => !ids.includes(m.id));
+    removeFromList(ids);
     repaintList();
     updateListCount();
     renderReader();
@@ -2014,7 +2036,7 @@ async function purgeIds(ids) {
   if (ids.length === 0) return;
   try {
     await invoke("batch_delete", { message_ids: ids, permanent: true });
-    state.messages = state.messages.filter((m) => !ids.includes(m.id));
+    removeFromList(ids);
     repaintList();
     updateListCount();
     renderReader();
@@ -2533,6 +2555,9 @@ function renderReader() {
   const keepScroll = curKey !== "" && reader.dataset.threadKey === curKey;
   const prevScroll = keepScroll ? reader.scrollTop : 0;
   clear(reader);
+  // 横向归零：.reader 元素跨邮件复用，WebKit 会保留上一次的 scrollLeft ——
+  // 上一封有超宽内容（长表格/长星号线）时，新邮件整个被顶到左边裁掉一块。
+  reader.scrollLeft = 0;
   const title = document.getElementById("reader-title");
 
   const msgs = state.thread?.messages?.length
@@ -3134,10 +3159,8 @@ async function markUnread(messageId) {
 async function deleteMessage(messageId, permanent) {
   try {
     await invoke("delete_message", { message_id: messageId, permanent });
-    state.messages = state.messages.filter((m) => m.id !== messageId);
-    if (state.messageId === messageId) {
-      state.messageId = null;
-      state.detail = null;
+    removeFromList([messageId]); // 含会话堆摘除 + 展开信收起
+    if (!state.detail) {
       document.querySelector(".shell")?.classList.remove("is-reading");
     }
     repaintList();

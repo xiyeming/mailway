@@ -456,8 +456,8 @@ impl Store {
     ) -> Result<Vec<MessageSummary>> {
         let conn = self.lock()?;
         let cond = match filter {
-            "unread" => "m.flags_seen = 0",
-            "flagged" => "m.flags_flagged = 1",
+            "unread" => "m.flags_seen = 0 AND f.kind != 'trash'",
+            "flagged" => "m.flags_flagged = 1 AND f.kind != 'trash'",
             "inbox" => "f.kind = 'inbox'",
             "sent" => "f.kind = 'sent'",
             other => return Err(Error::Config(format!("未知智能箱类型: {other}"))),
@@ -498,10 +498,15 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        let all_unread: u64 =
-            conn.query_row("SELECT COUNT(*) FROM messages WHERE flags_seen=0", [], |r| r.get(0))?;
+        // 垃圾箱里的信不算未读/红旗：删掉的信不该再顶着角标和「所有未读」。
+        let no_trash = "folder_id NOT IN (SELECT id FROM folders WHERE kind='trash')";
+        let all_unread: u64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM messages WHERE flags_seen=0 AND {no_trash}"),
+            [],
+            |r| r.get(0),
+        )?;
         let all_flagged: u64 = conn.query_row(
-            "SELECT COUNT(*) FROM messages WHERE flags_flagged=1",
+            &format!("SELECT COUNT(*) FROM messages WHERE flags_flagged=1 AND {no_trash}"),
             [],
             |r| r.get(0),
         )?;
@@ -520,14 +525,16 @@ impl Store {
             rows.collect::<rusqlite::Result<Vec<(i64, u64)>>>()?
         };
         let account_unread = {
-            let mut stmt = conn
-                .prepare("SELECT account_id, COUNT(*) FROM messages WHERE flags_seen=0 GROUP BY account_id")?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT account_id, COUNT(*) FROM messages WHERE flags_seen=0 AND {no_trash} GROUP BY account_id"
+            ))?;
             let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
             rows.collect::<rusqlite::Result<Vec<(i64, u64)>>>()?
         };
         let account_flagged = {
-            let mut stmt = conn
-                .prepare("SELECT account_id, COUNT(*) FROM messages WHERE flags_flagged=1 GROUP BY account_id")?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT account_id, COUNT(*) FROM messages WHERE flags_flagged=1 AND {no_trash} GROUP BY account_id"
+            ))?;
             let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
             rows.collect::<rusqlite::Result<Vec<(i64, u64)>>>()?
         };
@@ -566,13 +573,20 @@ impl Store {
         )?;
         let rows = stmt.query_map(params![account_id], row_to_summary)?;
         let all = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        // 垃圾箱不参与会话视图：删掉的回复不该在打开原邮件时「复活」。
+        let trash: std::collections::HashSet<i64> = conn
+            .prepare("SELECT id FROM folders WHERE account_id = ?1 AND kind = 'trash'")?
+            .query_map(params![account_id], |r| r.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect();
         // Gmail 会把同一封信同时存进 INBOX / 所有邮件 / 重要 等多个文件夹，
         // 每个文件夹一行 —— 按 RFC Message-ID 去重，同一封信只留一份
         // （不然阅读区同一封展示 N 次）。message_id 为空的行无法识别，保留。
         let mut seen = std::collections::HashSet::new();
         Ok(all
             .into_iter()
-            .filter(|m: &MessageSummary| m.thread_key == thread_key)
+            .filter(|m: &MessageSummary| m.thread_key == thread_key && !trash.contains(&m.folder_id))
             .filter(|m: &MessageSummary| {
                 m.message_id.is_empty() || seen.insert(m.message_id.clone())
             })
@@ -901,6 +915,40 @@ impl Store {
     /// 删一封信的本地行。附件行靠外键级联删，原文文件顺手清掉（清不掉
     /// 不算错 —— 上一次删到一半也会这样）。服务器那半边（MOVE 去废纸篓
     /// 或 EXPUNGE）不归这里管，见 commands 的 `delete_message`。
+    /// 这些行的所有「跨文件夹副本」id（同账号同 RFC Message-ID 的行）。
+    /// Gmail 把同一封信同时存进 INBOX / 所有邮件 / 重要，每个文件夹一行 ——
+    /// 删除时只删一行，聚合视图里剩下的副本会立刻「复活」这封邮件。
+    /// 「已发送」不算副本：发信留底是用户的记录，删除会话不该清掉它。
+    pub fn expand_to_copies(&self, ids: &[i64]) -> Result<Vec<i64>> {
+        let conn = self.lock()?;
+        let mut out: Vec<i64> = Vec::new();
+        let mut stmt = conn.prepare("SELECT account_id, message_id FROM messages WHERE id = ?1")?;
+        for id in ids {
+            let row = stmt
+                .query_row(params![id], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+                })
+                .optional()?;
+            let Some((acc, mid)) = row else {
+                out.push(*id);
+                continue;
+            };
+            if mid.is_empty() {
+                out.push(*id);
+                continue;
+            }
+            let mut q = conn.prepare(
+                "SELECT m.id FROM messages m JOIN folders f ON m.folder_id = f.id \
+                  WHERE m.account_id = ?1 AND m.message_id = ?2 AND f.kind != 'sent'",
+            )?;
+            let rows = q.query_map(params![acc, mid], |r| r.get::<_, i64>(0))?;
+            out.extend(rows.collect::<rusqlite::Result<Vec<_>>>()?);
+        }
+        out.sort_unstable();
+        out.dedup();
+        Ok(out)
+    }
+
     pub fn delete_message(&self, id: i64) -> Result<()> {
         let conn = self.lock()?;
         let rel: Option<Option<String>> = conn
@@ -1886,16 +1934,27 @@ fn attach_thread_counts(conn: &Connection, msgs: &mut [MessageSummary]) -> rusql
     let mut map: std::collections::HashMap<(i64, String), u32> = std::collections::HashMap::new();
     let mut seen: std::collections::HashSet<(i64, String, String)> = std::collections::HashSet::new();
     {
-        let mut stmt = conn.prepare("SELECT account_id, subject, message_id FROM messages")?;
+        // 垃圾箱里的信不算会话成员：删掉的回复不该虚高封数徽标。
+        let trash: std::collections::HashSet<i64> = conn
+            .prepare("SELECT id FROM folders WHERE kind = 'trash'")?
+            .query_map([], |r| r.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .collect();
+        let mut stmt = conn.prepare("SELECT account_id, subject, message_id, folder_id FROM messages")?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, Option<String>>(2)?,
+                r.get::<_, i64>(3)?,
             ))
         })?;
         for row in rows {
-            let (acc, subj, mid) = row?;
+            let (acc, subj, mid, fid) = row?;
+            if trash.contains(&fid) {
+                continue;
+            }
             let key = (acc, crate::thread::normalized_subject(&subj));
             if let Some(mid) = mid.filter(|m: &String| !m.is_empty()) {
                 if !seen.insert((acc, key.1.clone(), mid)) {
